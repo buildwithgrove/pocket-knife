@@ -40,6 +40,7 @@ def unstake(
             "--network", "main",
             "--home", str(home),
             "--gas=auto",
+            "--gas-adjustment=2.0",
             "--fees=200upokt",
             "--keyring-backend=test",
             "--unordered",
