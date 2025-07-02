@@ -19,17 +19,6 @@
 | 📊 **treasury** | Comprehensive balance analysis from JSON | • Multi-type detection<br>• Beautiful tables<br>• Grand totals |
 | 🔄 **unstake** | Mass-unstake multiple operator addresses | • Auto gas & fees<br>• Batch processing<br>• Success tracking |
 
-### 🛠️ Treasury Tools (Optional)
-
-<details>
-<summary>Click to expand specialized treasury commands</summary>
-
-- 💰 **treasury-tools liquid-balance**: Calculate liquid balances only
-- 🏦 **treasury-tools app-stakes**: Calculate app stake balances (liquid + staked)  
-- 🖥️ **treasury-tools node-stakes**: Calculate node stake balances (liquid + staked)
-
-</details>
-
 ## 📦 Installation
 
 ### Prerequisites
