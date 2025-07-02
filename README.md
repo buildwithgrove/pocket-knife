@@ -1,111 +1,126 @@
-# Pocket Knife
+# 🔧 Pocket Knife
 
-Syntactic sugar for pocketd – a Swiss army knife of common helpful commands and operations
+> 🎯 Syntactic sugar for `pocketd` – a Swiss army knife of common helpful commands and operations
 
-## Overview
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` command line tool. It provides simplified commands for common operations with sensible defaults.
+## 🌟 Overview
 
-## Features
+**Pocket Knife** is a powerful Python-based CLI wrapper for the Pocket Network's `pocketd` command line tool. It streamlines complex blockchain operations with beautiful output, sensible defaults, and user-friendly commands.
 
-### Current Commands
+## ⚡ Features
 
-- **unstake**: Mass-unstake multiple operator addresses from a file
-  - Automatically applies sensible defaults like `--gas=auto`, `--fees=200upokt`
-  - Uses unordered transactions with timeouts to prevent sequence conflicts
-  - Shows clear success/failure status for each address
+### 🚀 Main Commands
 
-- **treasury**: Comprehensive treasury balance analysis from JSON file
-  - Automatically detects and calculates liquid, app stake, and node stake balances
-  - Beautiful table output with totals and error reporting
-  - Grand total summary across all balance types
+| Command | Description | Key Features |
+|---------|-------------|--------------|
+| 🔄 **unstake** | Mass-unstake multiple operator addresses | • Auto gas & fees<br>• Batch processing<br>• Success tracking |
+| 📊 **treasury** | Comprehensive balance analysis from JSON | • Multi-type detection<br>• Beautiful tables<br>• Grand totals |
+| 🔍 **fetch-suppliers** | Get all operator addresses for an owner | • Real-time display<br>• Auto sorting<br>• Progress tracking |
 
-- **fetch-suppliers**: Fetch all supplier operator addresses for a given owner
-  - Queries the blockchain for all suppliers owned by an address
-  - Shows progress and found addresses in real-time
-  - Saves sorted, unique operator addresses to a file
+### 🛠️ Treasury Tools (Optional)
 
-### Treasury Subcommands (Optional)
+<details>
+<summary>Click to expand specialized treasury commands</summary>
 
-- **treasury-tools liquid-balance**: Calculate liquid balances only from text file
-- **treasury-tools app-stakes**: Calculate app stake balances only from text file  
-- **treasury-tools node-stakes**: Calculate node stake balances only from text file
+- 💰 **treasury-tools liquid-balance**: Calculate liquid balances only
+- 🏦 **treasury-tools app-stakes**: Calculate app stake balances (liquid + staked)  
+- 🖥️ **treasury-tools node-stakes**: Calculate node stake balances (liquid + staked)
 
-## Installation
+</details>
 
-1. Clone this repository:
+## 📦 Installation
+
+### Prerequisites
+- 🐍 Python 3.8+
+- 🔗 `pocketd` CLI tool installed and configured
+
+### Quick Start
+
+1. **📥 Clone the repository**
    ```bash
    git clone https://github.com/yourusername/pocket-knife.git
    cd pocket-knife
    ```
 
-2. Set up a Python virtual environment (recommended):
+2. **🏠 Set up virtual environment** (recommended)
    ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. **⚙️ Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
-
-### Unstaking Multiple Operators
-
-1. Create a text file with one operator address per line, for example:
+4. **🎉 You're ready!**
+   ```bash
+   python -m pocketknife --help
    ```
+
+## 📖 Usage
+
+### 🔄 Unstaking Multiple Operators
+
+> 💡 Batch unstake operators with automatic gas optimization and error handling
+
+1. **📝 Create address list**
+   ```txt
    pokt1gayzkm6ky5yyqe3267e20nukt4mxjxqyc2j92r
    pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t
    pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad
    ```
 
-2. Run the unstake command:
+2. **🚀 Execute unstaking**
    ```bash
    python -m pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
    ```
 
-   Note: The signer key must exist in the `test` keyring backend.
+   > ⚠️ **Note:** The signer key must exist in the `test` keyring backend.
 
-### Treasury Balance Operations
+### 📊 Treasury Balance Operations
 
-#### Liquid Balance Calculation
+<details>
+<summary>🛠️ Individual Balance Calculations (Click to expand)</summary>
 
-1. Create a text file with one address per line:
-   ```
-   pokt193mtz7ty4w8ulapeujgf2jes68ev0dq24lt80p
+#### 💰 Liquid Balance Calculation
+
+1. **📝 Create address list**
+   ```txt
+   pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r
    pokt1another5address6here
    ```
 
-2. Run the liquid balance command:
+2. **🔍 Query liquid balances**
    ```bash
    python -m pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
    ```
 
-#### App Stake Balance Calculation
+#### 🏦 App Stake Balance Calculation
 
-1. Create a text file with app stake addresses (one per line)
-
-2. Run the app stakes command:
+1. **📝 Create app stake address list**
+2. **🔍 Query app stake balances**
    ```bash
    python -m pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
    ```
 
-#### Node Stake Balance Calculation
+#### 🖥️ Node Stake Balance Calculation
 
-1. Create a text file with node stake addresses (one per line)
-
-2. Run the node stakes command:
+1. **📝 Create node stake address list**
+2. **🔍 Query node stake balances**
    ```bash
    python -m pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
    ```
 
-#### Complete Treasury Analysis
+</details>
 
-The main `treasury` command automatically detects which balance types to calculate based on your JSON file contents.
+#### 🎯 Complete Treasury Analysis
 
-1. Create a JSON file with your treasury addresses:
+> 🔥 **Recommended:** The main `treasury` command automatically detects balance types and prevents double-counting
+
+1. **📋 Create treasury JSON file**
    ```json
    {
      "liquid": [
@@ -122,47 +137,86 @@ The main `treasury` command automatically detects which balance types to calcula
    }
    ```
 
-   You can include any combination of the three address types. Empty arrays or missing sections are ignored.
+   > 💡 **Tip:** Include any combination of address types. Empty arrays are ignored.
 
-2. Run the treasury analysis:
+2. **🚀 Execute comprehensive analysis**
    ```bash
    python -m pocketknife treasury --file /path/to/treasury.json
    ```
 
-   This will automatically:
-   - Calculate liquid balances (if any liquid addresses provided)
-   - Calculate app stake balances with liquid + staked columns (if any app_stakes addresses provided)
-   - Calculate node stake balances with liquid + staked columns (if any node_stakes addresses provided)  
-   - Display a grand total summary across all categories found
+   **✨ What you get:**
+   - 💰 Liquid balances (if provided)
+   - 🏦 App stake balances with liquid + staked columns
+   - 🖥️ Node stake balances with liquid + staked columns
+   - 📈 **Grand total summary** across all categories
+   - 🛡️ **Duplicate detection** prevents double-counting
 
-### Fetching Supplier Addresses
+### 🔍 Fetching Supplier Addresses
 
-Use this command to get all operator addresses owned by a specific address:
+> 🎯 Discover all operator addresses owned by a specific wallet
+
+**💼 Use case:** Perfect for treasury management and bulk operations
 
 ```bash
-python -m pocketknife fetch-suppliers --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r --output-file ~/Desktop/operators.txt
+python -m pocketknife fetch-suppliers \
+  --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r \
+  --output-file ~/Desktop/operators.txt
 ```
 
-This will:
-- Query the blockchain for all suppliers
-- Filter for suppliers owned by the specified address
-- Show each found operator address in real-time
-- Save all addresses (sorted and unique) to the specified file
-- Display the total count of suppliers found
+**🎬 Live demo output:**
+```
+🔍 Fetching suppliers for owner: pokt1meem...
+📡 Querying blockchain for all suppliers...
+🔄 Parsing supplier data...
+📊 Found 6,148 total suppliers, filtering for owner...
+  ✅ pokt1operator1address...
+  ✅ pokt1operator2address...
+  ... (670 total found)
 
-## Configuration
+💾 Writing 670 addresses to: ~/Desktop/operators.txt
+🎉 Successfully saved 670 operator addresses!
+```
 
-- The tool always uses `~/.pocket/` as the home directory
-- All transactions use `--gas=auto` and `--fees=200upokt`
-- The keyring backend is always set to `test`
-- Network is always set to `main`
-- Transactions are submitted with `--unordered` and `--timeout-duration=1m` to prevent sequence conflicts
+**✨ Features:**
+- 🔍 **Smart filtering** from 6,000+ total suppliers
+- ⚡ **Real-time progress** with live address display  
+- 🔄 **Auto-sorting** and deduplication
+- 📁 **File management** with directory creation
 
-## Development
+## ⚙️ Configuration
 
-This project uses:
-- [Typer](https://typer.tiangolo.com/) for CLI interface
-- [Rich](https://rich.readthedocs.io/) for terminal output formatting
+### 🔧 Default Settings
+- 🏠 **Home directory:** `~/.pocket/`
+- ⛽ **Gas settings:** `--gas=auto` with `--fees=200upokt` 
+- 🔑 **Keyring backend:** `test`
+- 🌐 **Network:** `main`
+- ⏱️ **Transaction settings:** `--unordered` with `--timeout-duration=1m`
 
-To add new commands, extend the Typer app in `pocketknife/cli.py`.
+### 🌍 Network Endpoints
+- **Shannon Grove RPC:** `https://shannon-grove-rpc.mainnet.poktroll.com`
+
+---
+
+## 🛠️ Development
+
+### 🏗️ Built With
+- 🐍 [**Typer**](https://typer.tiangolo.com/) - Modern CLI framework
+- 🎨 [**Rich**](https://rich.readthedocs.io/) - Beautiful terminal output
+- 🔗 **pocketd** - Pocket Network CLI tool
+
+### 🚀 Contributing
+Want to add new commands? Extend the Typer app in `pocketknife/cli.py`
+
+### 📜 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+<div align="center">
+
+**Made with ❤️ for the Pocket Network community**
+
+[🐛 Report Bug](https://github.com/yourusername/pocket-knife/issues) • [✨ Request Feature](https://github.com/yourusername/pocket-knife/issues) • [📖 Documentation](https://github.com/yourusername/pocket-knife)
+
+</div>
 
