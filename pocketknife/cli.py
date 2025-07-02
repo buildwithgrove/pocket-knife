@@ -5,6 +5,9 @@ import re
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 
 app = typer.Typer(help="Pocketknife CLI: Syntactic sugar for poktroll operations.")
 
@@ -213,6 +216,129 @@ def get_liquid_balance(address: str) -> tuple[float, bool, str]:
         return 0.0, False, "Invalid JSON response"
     except Exception as e:
         return 0.0, False, str(e)
+
+
+def query_liquid_balances_parallel(addresses: list[str], max_workers: int = 10) -> dict:
+    """
+    Query liquid balances for multiple addresses in parallel.
+    Returns dict with results and metadata for progress tracking.
+    """
+    results = {}
+    failed = []
+    completed_count = 0
+    total_count = len(addresses)
+    lock = threading.Lock()
+    
+    def query_single_liquid(address: str):
+        nonlocal completed_count
+        balance, success, error = get_liquid_balance(address)
+        
+        with lock:
+            completed_count += 1
+            console.print(f"[dim]Liquid {completed_count}/{total_count}: {address}... done[/dim]")
+            
+            if success:
+                results[address] = balance
+            else:
+                failed.append((address, error))
+    
+    # Execute queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(query_single_liquid, addr) for addr in addresses]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle exceptions
+    
+    return {
+        'results': results,
+        'failed': failed,
+        'total_balance': sum(results.values())
+    }
+
+
+def query_app_stakes_parallel(addresses: list[str], max_workers: int = 10) -> dict:
+    """
+    Query app stake balances for multiple addresses in parallel.
+    Returns dict with results and metadata for progress tracking.
+    """
+    results = {}
+    failed = []
+    completed_count = 0
+    total_count = len(addresses)
+    lock = threading.Lock()
+    
+    def query_single_app(address: str):
+        nonlocal completed_count
+        liquid_balance, staked_balance, success, error = get_app_stake_balance(address)
+        
+        with lock:
+            completed_count += 1
+            console.print(f"[dim]App stake {completed_count}/{total_count}: {address}... done[/dim]")
+            
+            if success:
+                results[address] = {
+                    'liquid': liquid_balance,
+                    'staked': staked_balance,
+                    'total': liquid_balance + staked_balance
+                }
+            else:
+                failed.append((address, error))
+    
+    # Execute queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(query_single_app, addr) for addr in addresses]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle exceptions
+    
+    return {
+        'results': results,
+        'failed': failed,
+        'total_liquid': sum(r['liquid'] for r in results.values()),
+        'total_staked': sum(r['staked'] for r in results.values()),
+        'total_combined': sum(r['total'] for r in results.values())
+    }
+
+
+def query_node_stakes_parallel(addresses: list[str], max_workers: int = 10) -> dict:
+    """
+    Query node stake balances for multiple addresses in parallel.
+    Returns dict with results and metadata for progress tracking.
+    """
+    results = {}
+    failed = []
+    completed_count = 0
+    total_count = len(addresses)
+    lock = threading.Lock()
+    
+    def query_single_node(address: str):
+        nonlocal completed_count
+        liquid_balance, staked_balance, success, error = get_node_stake_balance(address)
+        
+        with lock:
+            completed_count += 1
+            console.print(f"[dim]Node stake {completed_count}/{total_count}: {address}... done[/dim]")
+            
+            if success:
+                results[address] = {
+                    'liquid': liquid_balance,
+                    'staked': staked_balance,
+                    'total': liquid_balance + staked_balance
+                }
+            else:
+                failed.append((address, error))
+    
+    # Execute queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(query_single_node, addr) for addr in addresses]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle exceptions
+    
+    return {
+        'results': results,
+        'failed': failed,
+        'total_liquid': sum(r['liquid'] for r in results.values()),
+        'total_staked': sum(r['staked'] for r in results.values()),
+        'total_combined': sum(r['total'] for r in results.values())
+    }
 
 
 @treasury_app.command()
@@ -640,10 +766,11 @@ def fetch_suppliers(
 @app.command()
 def treasury(
     addresses_file: Path = typer.Option(..., "--file", help="Path to JSON file with treasury addresses."),
+    max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
 ):
     """
     Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.
-    Automatically detects which balance types to calculate based on file contents.
+    Uses parallel processing for significantly faster execution.
     Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...]}
     """
     if not addresses_file.exists():
@@ -652,14 +779,45 @@ def treasury(
 
     treasury_data = load_treasury_addresses(addresses_file)
     
-    total_liquid_all = 0.0
-    total_app_stakes = 0.0
-    total_node_stakes = 0.0  # For future use
-    
-    # Process liquid addresses
+    # Get address lists
     liquid_addresses = treasury_data.get("liquid", [])
-    if liquid_addresses:
-        console.print(f"[bold blue]Processing {len(liquid_addresses)} liquid addresses...[/bold blue]")
+    app_stake_addresses = treasury_data.get("app_stakes", [])
+    node_stake_addresses = treasury_data.get("node_stakes", [])
+    
+    # Display execution plan
+    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses)
+    console.print(f"[bold blue]Starting parallel treasury analysis...[/bold blue]")
+    console.print(f"[dim]Total addresses: {total_addresses} | Max workers: {max_workers}[/dim]")
+    
+    # Run all categories in parallel
+    futures = {}
+    results = {}
+    
+    with ThreadPoolExecutor(max_workers=3) as category_executor:  # One worker per category
+        # Submit category-level tasks
+        if liquid_addresses:
+            console.print(f"[yellow]Querying {len(liquid_addresses)} liquid addresses...[/yellow]")
+            futures['liquid'] = category_executor.submit(query_liquid_balances_parallel, liquid_addresses, max_workers)
+        
+        if app_stake_addresses:
+            console.print(f"[yellow]Querying {len(app_stake_addresses)} app stake addresses...[/yellow]")
+            futures['app_stakes'] = category_executor.submit(query_app_stakes_parallel, app_stake_addresses, max_workers)
+        
+        if node_stake_addresses:
+            console.print(f"[yellow]Querying {len(node_stake_addresses)} node stake addresses...[/yellow]")
+            futures['node_stakes'] = category_executor.submit(query_node_stakes_parallel, node_stake_addresses, max_workers)
+        
+        # Collect results as they complete
+        for category in futures:
+            results[category] = futures[category].result()
+    
+    console.print(f"[green]✓ All queries completed![/green]\n")
+    
+    # Display results for liquid addresses
+    total_liquid_all = 0.0
+    if liquid_addresses and 'liquid' in results:
+        liquid_data = results['liquid']
+        total_liquid_all = liquid_data['total_balance']
         
         # Create liquid table
         liquid_table = Table(title="Liquid Balance Report")
@@ -667,49 +825,42 @@ def treasury(
         liquid_table.add_column("Balance (POKT)", justify="right", style="green")
         liquid_table.add_column("Status", justify="center")
         
-        liquid_failed = []
+        # Add successful results
+        for address, balance in liquid_data['results'].items():
+            liquid_table.add_row(
+                address,
+                f"{balance:,.2f}",
+                "[green]✓[/green]"
+            )
         
-        for i, address in enumerate(liquid_addresses, 1):
-            console.print(f"[dim]Querying liquid {i}/{len(liquid_addresses)}: {address}...[/dim]", end="")
-            
-            balance, success, error = get_liquid_balance(address)
-            console.print(" done")
-            
-            if success:
-                total_liquid_all += balance
-                liquid_table.add_row(
-                    address,
-                    f"{balance:,.2f}",
-                    "[green]✓[/green]"
-                )
-            else:
-                liquid_failed.append((address, error))
-                liquid_table.add_row(
-                    address,
-                    "0.00",
-                    "[red]✗[/red]"
-                )
+        # Add failed results
+        for address, error in liquid_data['failed']:
+            liquid_table.add_row(
+                address,
+                "0.00",
+                "[red]✗[/red]"
+            )
         
-        # Add liquid total
+        # Add total
         liquid_table.add_section()
         liquid_table.add_row(
             "[bold]TOTAL[/bold]",
             f"[bold green]{total_liquid_all:,.2f}[/bold green]",
-            f"[dim]{len(liquid_addresses)-len(liquid_failed)}/{len(liquid_addresses)}[/dim]"
+            f"[dim]{len(liquid_data['results'])}/{len(liquid_addresses)}[/dim]"
         )
         
-        console.print("\n")
         console.print(liquid_table)
         
-        if liquid_failed:
-            console.print(f"\n[red]Failed liquid queries ({len(liquid_failed)}):[/red]")
-            for address, error in liquid_failed:
+        if liquid_data['failed']:
+            console.print(f"\n[red]Failed liquid queries ({len(liquid_data['failed'])}):[/red]")
+            for address, error in liquid_data['failed']:
                 console.print(f"  [red]•[/red] {address}: {error}")
     
-    # Process app stake addresses
-    app_stake_addresses = treasury_data.get("app_stakes", [])
-    if app_stake_addresses:
-        console.print(f"\n[bold blue]Processing {len(app_stake_addresses)} app stake addresses...[/bold blue]")
+    # Display results for app stake addresses
+    total_app_stakes = 0.0
+    if app_stake_addresses and 'app_stakes' in results:
+        app_data = results['app_stakes']
+        total_app_stakes = app_data['total_combined']
         
         # Create app stakes table
         app_table = Table(title="App Stake Balance Report")
@@ -719,61 +870,49 @@ def treasury(
         app_table.add_column("Total (POKT)", justify="right", style="magenta")
         app_table.add_column("Status", justify="center")
         
-        app_failed = []
-        app_total_liquid = 0.0
-        app_total_staked = 0.0
+        # Add successful results
+        for address, balance_data in app_data['results'].items():
+            app_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['staked']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
         
-        for i, address in enumerate(app_stake_addresses, 1):
-            console.print(f"[dim]Querying app stake {i}/{len(app_stake_addresses)}: {address}...[/dim]", end="")
-            
-            liquid_balance, staked_balance, success, error = get_app_stake_balance(address)
-            console.print(" done")
-            total_balance = liquid_balance + staked_balance
-            
-            if success:
-                app_total_liquid += liquid_balance
-                app_total_staked += staked_balance
-                app_table.add_row(
-                    address,
-                    f"{liquid_balance:,.2f}",
-                    f"{staked_balance:,.2f}",
-                    f"{total_balance:,.2f}",
-                    "[green]✓[/green]"
-                )
-            else:
-                app_failed.append((address, error))
-                app_table.add_row(
-                    address,
-                    "0.00",
-                    "0.00",
-                    "0.00",
-                    "[red]✗[/red]"
-                )
+        # Add failed results
+        for address, error in app_data['failed']:
+            app_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
         
-        total_app_stakes = app_total_liquid + app_total_staked
-        
-        # Add app stakes total
+        # Add total
         app_table.add_section()
         app_table.add_row(
             "[bold]TOTAL[/bold]",
-            f"[bold green]{app_total_liquid:,.2f}[/bold green]",
-            f"[bold blue]{app_total_staked:,.2f}[/bold blue]",
+            f"[bold green]{app_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold blue]{app_data['total_staked']:,.2f}[/bold blue]",
             f"[bold magenta]{total_app_stakes:,.2f}[/bold magenta]",
-            f"[dim]{len(app_stake_addresses)-len(app_failed)}/{len(app_stake_addresses)}[/dim]"
+            f"[dim]{len(app_data['results'])}/{len(app_stake_addresses)}[/dim]"
         )
         
         console.print("\n")
         console.print(app_table)
         
-        if app_failed:
-            console.print(f"\n[red]Failed app stake queries ({len(app_failed)}):[/red]")
-            for address, error in app_failed:
+        if app_data['failed']:
+            console.print(f"\n[red]Failed app stake queries ({len(app_data['failed'])}):[/red]")
+            for address, error in app_data['failed']:
                 console.print(f"  [red]•[/red] {address}: {error}")
     
-    # Process node stake addresses
-    node_stake_addresses = treasury_data.get("node_stakes", [])
-    if node_stake_addresses:
-        console.print(f"\n[bold blue]Processing {len(node_stake_addresses)} node stake addresses...[/bold blue]")
+    # Display results for node stake addresses
+    total_node_stakes = 0.0
+    if node_stake_addresses and 'node_stakes' in results:
+        node_data = results['node_stakes']
+        total_node_stakes = node_data['total_combined']
         
         # Create node stakes table
         node_table = Table(title="Node Stake Balance Report")
@@ -783,58 +922,43 @@ def treasury(
         node_table.add_column("Total (POKT)", justify="right", style="magenta")
         node_table.add_column("Status", justify="center")
         
-        node_failed = []
-        node_total_liquid = 0.0
-        node_total_staked = 0.0
+        # Add successful results
+        for address, balance_data in node_data['results'].items():
+            node_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['staked']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
         
-        for i, address in enumerate(node_stake_addresses, 1):
-            console.print(f"[dim]Querying node stake {i}/{len(node_stake_addresses)}: {address}...[/dim]", end="")
-            
-            liquid_balance, staked_balance, success, error = get_node_stake_balance(address)
-            console.print(" done")
-            total_balance = liquid_balance + staked_balance
-            
-            if success:
-                node_total_liquid += liquid_balance
-                node_total_staked += staked_balance
-                node_table.add_row(
-                    address,
-                    f"{liquid_balance:,.2f}",
-                    f"{staked_balance:,.2f}",
-                    f"{total_balance:,.2f}",
-                    "[green]✓[/green]"
-                )
-            else:
-                node_failed.append((address, error))
-                node_table.add_row(
-                    address,
-                    "0.00",
-                    "0.00",
-                    "0.00",
-                    "[red]✗[/red]"
-                )
+        # Add failed results
+        for address, error in node_data['failed']:
+            node_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
         
-        total_node_stakes = node_total_liquid + node_total_staked
-        
-        # Add node stakes total
+        # Add total
         node_table.add_section()
         node_table.add_row(
             "[bold]TOTAL[/bold]",
-            f"[bold green]{node_total_liquid:,.2f}[/bold green]",
-            f"[bold blue]{node_total_staked:,.2f}[/bold blue]",
+            f"[bold green]{node_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold blue]{node_data['total_staked']:,.2f}[/bold blue]",
             f"[bold magenta]{total_node_stakes:,.2f}[/bold magenta]",
-            f"[dim]{len(node_stake_addresses)-len(node_failed)}/{len(node_stake_addresses)}[/dim]"
+            f"[dim]{len(node_data['results'])}/{len(node_stake_addresses)}[/dim]"
         )
         
         console.print("\n")
         console.print(node_table)
         
-        if node_failed:
-            console.print(f"\n[red]Failed node stake queries ({len(node_failed)}):[/red]")
-            for address, error in node_failed:
+        if node_data['failed']:
+            console.print(f"\n[red]Failed node stake queries ({len(node_data['failed'])}):[/red]")
+            for address, error in node_data['failed']:
                 console.print(f"  [red]•[/red] {address}: {error}")
-    else:
-        total_node_stakes = 0.0
     
     # Grand total summary
     grand_total = total_liquid_all + total_app_stakes + total_node_stakes
