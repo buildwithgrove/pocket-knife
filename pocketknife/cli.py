@@ -536,6 +536,107 @@ def load_treasury_addresses(file_path: Path) -> dict:
         raise typer.Exit(1)
 
 
+def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
+    """
+    Fetch all supplier operator addresses for a given owner address.
+    Returns a sorted list of unique operator addresses.
+    """
+    console.print(f"[yellow]Fetching suppliers for owner: {owner_address}[/yellow]")
+    
+    cmd = [
+        "pocketd", "q", "supplier", "list-suppliers",
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--grpc-insecure=false",
+        "-o", "json",
+        "--page-limit=100000",
+        "--page-count-total"
+    ]
+    
+    try:
+        console.print("[dim]Querying blockchain for all suppliers...[/dim]")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode != 0:
+            console.print(f"[red]Error fetching suppliers:[/red] {result.stderr.strip()}")
+            raise typer.Exit(1)
+        
+        console.print("[dim]Parsing supplier data...[/dim]")
+        data = json.loads(result.stdout)
+        suppliers = data.get("supplier", [])
+        
+        if not suppliers:
+            console.print("[red]No suppliers found in the response[/red]")
+            raise typer.Exit(1)
+        
+        console.print(f"[dim]Found {len(suppliers)} total suppliers, filtering for owner...[/dim]")
+        
+        # Filter suppliers by owner address and collect operator addresses
+        operator_addresses = []
+        for supplier in suppliers:
+            if supplier.get("owner_address") == owner_address:
+                operator_addr = supplier.get("operator_address")
+                if operator_addr:
+                    operator_addresses.append(operator_addr)
+                    console.print(f"[green]  ✓[/green] {operator_addr}")
+        
+        # Sort and deduplicate
+        unique_addresses = sorted(set(operator_addresses))
+        
+        console.print(f"\n[cyan]Found {len(operator_addresses)} supplier(s) ({len(unique_addresses)} unique)[/cyan]")
+        
+        return unique_addresses
+        
+    except subprocess.TimeoutExpired:
+        console.print("[red]Timeout: Query took too long (>2 minutes)[/red]")
+        raise typer.Exit(1)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Error parsing JSON response:[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Unexpected error:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def fetch_suppliers(
+    owner_address: str = typer.Option(..., "--owner-address", help="Owner address to fetch suppliers for"),
+    output_file: Path = typer.Option(..., "--output-file", help="Path to save the operator addresses"),
+):
+    """
+    Fetch all supplier operator addresses for a given owner address and save to file.
+    """
+    # Validate owner address format
+    if not owner_address.startswith("pokt1") or len(owner_address) != 43:
+        console.print(f"[red]Invalid owner address format:[/red] {owner_address}")
+        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
+        raise typer.Exit(1)
+    
+    # Fetch suppliers
+    operator_addresses = fetch_suppliers_for_owner(owner_address)
+    
+    if not operator_addresses:
+        console.print(f"[red]No suppliers found for owner address: {owner_address}[/red]")
+        console.print("[yellow]This address may not own any supplier nodes.[/yellow]")
+        raise typer.Exit(1)
+    
+    # Write to file
+    try:
+        console.print(f"\n[yellow]Writing {len(operator_addresses)} addresses to: {output_file}[/yellow]")
+        
+        # Create parent directory if it doesn't exist
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with output_file.open('w') as f:
+            for addr in operator_addresses:
+                f.write(f"{addr}\n")
+        
+        console.print(f"[green]✓ Successfully saved {len(operator_addresses)} operator addresses to {output_file}[/green]")
+        
+    except Exception as e:
+        console.print(f"[red]Error writing to file:[/red] {e}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def treasury(
     addresses_file: Path = typer.Option(..., "--file", help="Path to JSON file with treasury addresses."),

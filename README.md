@@ -20,6 +20,11 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
   - Beautiful table output with totals and error reporting
   - Grand total summary across all balance types
 
+- **fetch-suppliers**: Fetch all supplier operator addresses for a given owner
+  - Queries the blockchain for all suppliers owned by an address
+  - Shows progress and found addresses in real-time
+  - Saves sorted, unique operator addresses to a file
+
 ### Treasury Subcommands (Optional)
 
 - **treasury-tools liquid-balance**: Calculate liquid balances only from text file
@@ -129,6 +134,21 @@ The main `treasury` command automatically detects which balance types to calcula
    - Calculate app stake balances with liquid + staked columns (if any app_stakes addresses provided)
    - Calculate node stake balances with liquid + staked columns (if any node_stakes addresses provided)  
    - Display a grand total summary across all categories found
+
+### Fetching Supplier Addresses
+
+Use this command to get all operator addresses owned by a specific address:
+
+```bash
+python -m pocketknife fetch-suppliers --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r --output-file ~/Desktop/operators.txt
+```
+
+This will:
+- Query the blockchain for all suppliers
+- Filter for suppliers owned by the specified address
+- Show each found operator address in real-time
+- Save all addresses (sorted and unique) to the specified file
+- Display the total count of suppliers found
 
 ## Configuration
 
