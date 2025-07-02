@@ -22,8 +22,9 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
 
 ### Treasury Subcommands (Optional)
 
-- **treasury liquid-balance**: Calculate liquid balances only from text file
-- **treasury app-stakes**: Calculate app stake balances only from text file
+- **treasury-tools liquid-balance**: Calculate liquid balances only from text file
+- **treasury-tools app-stakes**: Calculate app stake balances only from text file  
+- **treasury-tools node-stakes**: Calculate node stake balances only from text file
 
 ## Installation
 
@@ -74,7 +75,7 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
 
 2. Run the liquid balance command:
    ```bash
-   python -m pocketknife treasury liquid-balance --file /path/to/addresses.txt
+   python -m pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
    ```
 
 #### App Stake Balance Calculation
@@ -83,7 +84,16 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
 
 2. Run the app stakes command:
    ```bash
-   python -m pocketknife treasury app-stakes --file /path/to/app_addresses.txt
+   python -m pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
+   ```
+
+#### Node Stake Balance Calculation
+
+1. Create a text file with node stake addresses (one per line)
+
+2. Run the node stakes command:
+   ```bash
+   python -m pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
    ```
 
 #### Complete Treasury Analysis
@@ -117,7 +127,7 @@ The main `treasury` command automatically detects which balance types to calcula
    This will automatically:
    - Calculate liquid balances (if any liquid addresses provided)
    - Calculate app stake balances with liquid + staked columns (if any app_stakes addresses provided)
-   - Calculate node stake balances (when implemented, if any node_stakes addresses provided)  
+   - Calculate node stake balances with liquid + staked columns (if any node_stakes addresses provided)  
    - Display a grand total summary across all categories found
 
 ## Configuration

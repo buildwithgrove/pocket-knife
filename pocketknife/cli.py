@@ -59,6 +59,65 @@ def unstake(
             console.print(f"[red]Failed:[/red] {address}")
 
 
+def get_node_stake_balance(address: str) -> tuple[float, float, bool, str]:
+    """
+    Get node stake balance for a single address.
+    Returns (liquid_balance, staked_balance, success, error_message)
+    """
+    # Get liquid balance first
+    liquid_balance, liquid_success, liquid_error = get_liquid_balance(address)
+    
+    # Get staked balance
+    cmd = [
+        "pocketd", "query", "supplier", "show-supplier", address,
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--output", "json"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            if liquid_success:
+                return liquid_balance, 0.0, True, "No node stake found"
+            else:
+                return 0.0, 0.0, False, liquid_error or "No node stake found"
+        
+        data = json.loads(result.stdout)
+        supplier = data.get("supplier", {})
+        stake = supplier.get("stake", {})
+        
+        if not stake:
+            if liquid_success:
+                return liquid_balance, 0.0, True, "No node stake found"
+            else:
+                return 0.0, 0.0, False, liquid_error or "No node stake found"
+        
+        upokt_staked = int(stake.get("amount", 0))
+        pokt_staked = upokt_staked / 1_000_000
+        
+        # Return success if either liquid or staked balance exists
+        success = liquid_success or (pokt_staked > 0)
+        error_msg = "" if success else (liquid_error or "No balances found")
+        
+        return liquid_balance, pokt_staked, success, error_msg
+        
+    except subprocess.TimeoutExpired:
+        if liquid_success:
+            return liquid_balance, 0.0, True, "Node stake query timeout"
+        else:
+            return 0.0, 0.0, False, "Query timeout"
+    except json.JSONDecodeError:
+        if liquid_success:
+            return liquid_balance, 0.0, True, "Invalid node stake JSON response"
+        else:
+            return 0.0, 0.0, False, "Invalid JSON response"
+    except Exception as e:
+        if liquid_success:
+            return liquid_balance, 0.0, True, f"Node stake error: {str(e)}"
+        else:
+            return 0.0, 0.0, False, str(e)
+
+
 def get_app_stake_balance(address: str) -> tuple[float, float, bool, str]:
     """
     Get app stake balance for a single address.
@@ -75,7 +134,7 @@ def get_app_stake_balance(address: str) -> tuple[float, float, bool, str]:
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             if liquid_success:
                 return liquid_balance, 0.0, True, "No app stake found"
@@ -130,7 +189,7 @@ def get_liquid_balance(address: str) -> tuple[float, bool, str]:
     ]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             return 0.0, False, result.stderr.strip() or "Unknown error"
         
@@ -220,6 +279,90 @@ def liquid_balance(
     console.print(table)
     
     console.print(f"[dim]Successfully queried: {len(successful_balances)}/{len(addresses)} addresses[/dim]")
+    
+    # Show failed addresses if any
+    if failed_addresses:
+        console.print(f"\n[red]Failed to query {len(failed_addresses)} addresses:[/red]")
+        for address, error in failed_addresses:
+            console.print(f"  [red]•[/red] {address}: {error}")
+
+
+@treasury_app.command()
+def node_stakes(
+    addresses_file: Path = typer.Option(..., "--file", help="Path to file with addresses, one per line."),
+):
+    """
+    Calculate node stake balances (liquid + staked) for addresses listed in a file.
+    """
+    if not addresses_file.exists():
+        console.print(f"[red]File not found:[/red] {addresses_file}")
+        raise typer.Exit(1)
+
+    with addresses_file.open() as f:
+        addresses = [line.strip() for line in f if line.strip()]
+
+    if not addresses:
+        console.print("[red]No addresses found in the file. Exiting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Querying node stake balances for {len(addresses)} addresses...[/yellow]")
+    
+    # Create table for results
+    table = Table(title="Node Stake Balance Report")
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Liquid (POKT)", justify="right", style="green")
+    table.add_column("Staked (POKT)", justify="right", style="blue")
+    table.add_column("Total (POKT)", justify="right", style="magenta")
+    table.add_column("Status", justify="center")
+    
+    successful_queries = []
+    failed_addresses = []
+    total_liquid = 0.0
+    total_staked = 0.0
+    
+    for i, address in enumerate(addresses, 1):
+        console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
+        
+        liquid_balance, staked_balance, success, error = get_node_stake_balance(address)
+        total_balance = liquid_balance + staked_balance
+        
+        if success:
+            successful_queries.append((address, liquid_balance, staked_balance, total_balance))
+            total_liquid += liquid_balance
+            total_staked += staked_balance
+            table.add_row(
+                address,
+                f"{liquid_balance:,.2f}",
+                f"{staked_balance:,.2f}",
+                f"{total_balance:,.2f}",
+                "[green]✓[/green]"
+            )
+        else:
+            failed_addresses.append((address, error))
+            table.add_row(
+                address,
+                "0.00",
+                "0.00", 
+                "0.00",
+                "[red]✗[/red]"
+            )
+    
+    # Add separator row and totals
+    table.add_section()
+    grand_total = total_liquid + total_staked
+    table.add_row(
+        "[bold]TOTAL[/bold]",
+        f"[bold green]{total_liquid:,.2f}[/bold green]",
+        f"[bold blue]{total_staked:,.2f}[/bold blue]",
+        f"[bold magenta]{grand_total:,.2f}[/bold magenta]",
+        f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
+    )
+    
+    # Display results table
+    console.print("\n")
+    console.print(table)
+    
+    console.print(f"[dim]Successfully queried: {len(successful_queries)}/{len(addresses)} addresses[/dim]")
     
     # Show failed addresses if any
     if failed_addresses:
@@ -373,9 +516,10 @@ def treasury(
         liquid_failed = []
         
         for i, address in enumerate(liquid_addresses, 1):
-            console.print(f"[dim]Querying liquid {i}/{len(liquid_addresses)}: {address}[/dim]")
+            console.print(f"[dim]Querying liquid {i}/{len(liquid_addresses)}: {address}...[/dim]", end="")
             
             balance, success, error = get_liquid_balance(address)
+            console.print(" done")
             
             if success:
                 total_liquid_all += balance
@@ -426,9 +570,10 @@ def treasury(
         app_total_staked = 0.0
         
         for i, address in enumerate(app_stake_addresses, 1):
-            console.print(f"[dim]Querying app stake {i}/{len(app_stake_addresses)}: {address}[/dim]")
+            console.print(f"[dim]Querying app stake {i}/{len(app_stake_addresses)}: {address}...[/dim]", end="")
             
             liquid_balance, staked_balance, success, error = get_app_stake_balance(address)
+            console.print(" done")
             total_balance = liquid_balance + staked_balance
             
             if success:
@@ -471,10 +616,71 @@ def treasury(
             for address, error in app_failed:
                 console.print(f"  [red]•[/red] {address}: {error}")
     
-    # Node stakes (placeholder for future)
+    # Process node stake addresses
     node_stake_addresses = treasury_data.get("node_stakes", [])
     if node_stake_addresses:
-        console.print(f"\n[yellow]Node stake addresses found ({len(node_stake_addresses)}) but not yet implemented[/yellow]")
+        console.print(f"\n[bold blue]Processing {len(node_stake_addresses)} node stake addresses...[/bold blue]")
+        
+        # Create node stakes table
+        node_table = Table(title="Node Stake Balance Report")
+        node_table.add_column("Address", style="cyan", no_wrap=True)
+        node_table.add_column("Liquid (POKT)", justify="right", style="green")
+        node_table.add_column("Staked (POKT)", justify="right", style="blue")
+        node_table.add_column("Total (POKT)", justify="right", style="magenta")
+        node_table.add_column("Status", justify="center")
+        
+        node_failed = []
+        node_total_liquid = 0.0
+        node_total_staked = 0.0
+        
+        for i, address in enumerate(node_stake_addresses, 1):
+            console.print(f"[dim]Querying node stake {i}/{len(node_stake_addresses)}: {address}...[/dim]", end="")
+            
+            liquid_balance, staked_balance, success, error = get_node_stake_balance(address)
+            console.print(" done")
+            total_balance = liquid_balance + staked_balance
+            
+            if success:
+                node_total_liquid += liquid_balance
+                node_total_staked += staked_balance
+                node_table.add_row(
+                    address,
+                    f"{liquid_balance:,.2f}",
+                    f"{staked_balance:,.2f}",
+                    f"{total_balance:,.2f}",
+                    "[green]✓[/green]"
+                )
+            else:
+                node_failed.append((address, error))
+                node_table.add_row(
+                    address,
+                    "0.00",
+                    "0.00",
+                    "0.00",
+                    "[red]✗[/red]"
+                )
+        
+        total_node_stakes = node_total_liquid + node_total_staked
+        
+        # Add node stakes total
+        node_table.add_section()
+        node_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{node_total_liquid:,.2f}[/bold green]",
+            f"[bold blue]{node_total_staked:,.2f}[/bold blue]",
+            f"[bold magenta]{total_node_stakes:,.2f}[/bold magenta]",
+            f"[dim]{len(node_stake_addresses)-len(node_failed)}/{len(node_stake_addresses)}[/dim]"
+        )
+        
+        console.print("\n")
+        console.print(node_table)
+        
+        if node_failed:
+            console.print(f"\n[red]Failed node stake queries ({len(node_failed)}):[/red]")
+            for address, error in node_failed:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    else:
+        total_node_stakes = 0.0
     
     # Grand total summary
     grand_total = total_liquid_all + total_app_stakes + total_node_stakes
@@ -484,7 +690,7 @@ def treasury(
     console.print("="*60)
     console.print(f"[green]Liquid Balances:[/green]     {total_liquid_all:>15,.2f} POKT")
     console.print(f"[blue]App Stake Balances:[/blue]   {total_app_stakes:>15,.2f} POKT")
-    console.print(f"[dim]Node Stake Balances:[/dim]  {total_node_stakes:>15,.2f} POKT [dim](not implemented)[/dim]")
+    console.print(f"[blue]Node Stake Balances:[/blue]   {total_node_stakes:>15,.2f} POKT")
     console.print("-" * 60)
     console.print(f"[bold magenta]GRAND TOTAL:[/bold magenta]        {grand_total:>15,.2f} POKT")
     console.print("="*60)
