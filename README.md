@@ -15,9 +15,16 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
   - Uses unordered transactions with timeouts to prevent sequence conflicts
   - Shows clear success/failure status for each address
 
-### Coming Soon
+- **treasury**: Comprehensive treasury balance analysis from JSON file
+  - Automatically detects and calculates liquid, app stake, and node stake balances
+  - Beautiful table output with totals and error reporting
+  - Grand total summary across all balance types
 
-- **treasury**: Commands for treasury operations (in development)
+### Treasury Subcommands (Optional)
+
+- **treasury-tools liquid-balance**: Calculate liquid balances only from text file
+- **treasury-tools app-stakes**: Calculate app stake balances only from text file  
+- **treasury-tools node-stakes**: Calculate node stake balances only from text file
 
 ## Installation
 
@@ -51,10 +58,77 @@ Pocket Knife is a Python-based CLI wrapper for the Pocket Network's `pocketd` co
 
 2. Run the unstake command:
    ```bash
-   python -m pocketknife unstake --operator-addresses-file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
+   python -m pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
    ```
 
    Note: The signer key must exist in the `test` keyring backend.
+
+### Treasury Balance Operations
+
+#### Liquid Balance Calculation
+
+1. Create a text file with one address per line:
+   ```
+   pokt193mtz7ty4w8ulapeujgf2jes68ev0dq24lt80p
+   pokt1another5address6here
+   ```
+
+2. Run the liquid balance command:
+   ```bash
+   python -m pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
+   ```
+
+#### App Stake Balance Calculation
+
+1. Create a text file with app stake addresses (one per line)
+
+2. Run the app stakes command:
+   ```bash
+   python -m pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
+   ```
+
+#### Node Stake Balance Calculation
+
+1. Create a text file with node stake addresses (one per line)
+
+2. Run the node stakes command:
+   ```bash
+   python -m pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
+   ```
+
+#### Complete Treasury Analysis
+
+The main `treasury` command automatically detects which balance types to calculate based on your JSON file contents.
+
+1. Create a JSON file with your treasury addresses:
+   ```json
+   {
+     "liquid": [
+       "pokt193mtz7ty4w8ulapeujgf2jes68ev0dq24lt80p",
+       "pokt1another5liquid6address"
+     ],
+     "app_stakes": [
+       "pokt1mah7e8zyqs0p60qvwdydc7kaej5sm3sjs7um0a",
+       "pokt1another5app6stake7address" 
+     ],
+     "node_stakes": [
+       "pokt1node5stake6address7here"
+     ]
+   }
+   ```
+
+   You can include any combination of the three address types. Empty arrays or missing sections are ignored.
+
+2. Run the treasury analysis:
+   ```bash
+   python -m pocketknife treasury --file /path/to/treasury.json
+   ```
+
+   This will automatically:
+   - Calculate liquid balances (if any liquid addresses provided)
+   - Calculate app stake balances with liquid + staked columns (if any app_stakes addresses provided)
+   - Calculate node stake balances with liquid + staked columns (if any node_stakes addresses provided)  
+   - Display a grand total summary across all categories found
 
 ## Configuration
 
