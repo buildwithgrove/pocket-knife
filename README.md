@@ -232,7 +232,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Made with ❤️ for the Pocket Network community**
 
-[🐛 Report Bug](https://github.com/buildwithgrove/pocketknife/issues) • [✨ Request Feature](https://github.com/buildwithgrove/pocketknife/issues) • [📖 Documentation](https://github.com/buildwithgrove/pocket-knife)
+[🐛 Report Bug](https://github.com/buildwithgrove/pocket-knife/issues) • [✨ Request Feature](https://github.com/buildwithgrove/pocke-tknife/issues) • [📖 Documentation](https://github.com/buildwithgrove/pocket-knife)
 
 </div>
 
