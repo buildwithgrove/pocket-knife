@@ -455,6 +455,56 @@ def app_stakes(
             console.print(f"  [red]•[/red] {address}: {error}")
 
 
+def validate_and_deduplicate_addresses(data: dict) -> dict:
+    """
+    Validate and deduplicate addresses in treasury data.
+    Returns cleaned data or raises exit on errors.
+    """
+    liquid = data.get("liquid", [])
+    app_stakes = data.get("app_stakes", [])
+    node_stakes = data.get("node_stakes", [])
+    
+    # Check for duplicates within each array
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes)]:
+        if len(addresses) != len(set(addresses)):
+            duplicates = [addr for addr in addresses if addresses.count(addr) > 1]
+            unique_duplicates = list(set(duplicates))
+            console.print(f"[red]Error: Duplicate addresses found within '{array_name}' array:[/red]")
+            for dup in unique_duplicates:
+                console.print(f"  [red]•[/red] {dup} appears {addresses.count(dup)} times")
+            console.print(f"[yellow]Please remove duplicates from the '{array_name}' array and try again.[/yellow]")
+            raise typer.Exit(1)
+    
+    # Check for cross-array duplicates
+    all_addresses = set()
+    conflicts = {}
+    
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes)]:
+        for addr in addresses:
+            if addr in all_addresses:
+                if addr not in conflicts:
+                    conflicts[addr] = []
+                conflicts[addr].append(array_name)
+            else:
+                all_addresses.add(addr)
+                conflicts[addr] = [array_name]
+    
+    # Find addresses that appear in multiple arrays
+    cross_duplicates = {addr: arrays for addr, arrays in conflicts.items() if len(arrays) > 1}
+    
+    if cross_duplicates:
+        console.print("[red]Error: Addresses found in multiple arrays (will cause double-counting of liquid balances):[/red]")
+        for addr, arrays in cross_duplicates.items():
+            console.print(f"  [red]•[/red] {addr} appears in: {', '.join(arrays)}")
+        
+        console.print("\n[yellow]Recommendation: Remove these addresses from the 'liquid' array since[/yellow]")
+        console.print("[yellow]app_stakes and node_stakes already calculate liquid balances.[/yellow]")
+        console.print("\n[yellow]Please fix the duplicate addresses and try again.[/yellow]")
+        raise typer.Exit(1)
+    
+    return data
+
+
 def load_treasury_addresses(file_path: Path) -> dict:
     """
     Load treasury addresses from JSON file.
@@ -473,6 +523,9 @@ def load_treasury_addresses(file_path: Path) -> dict:
                 data[key] = []
             elif not isinstance(data[key], list):
                 raise ValueError(f"'{key}' must be an array")
+        
+        # Validate and deduplicate addresses
+        data = validate_and_deduplicate_addresses(data)
         
         return data
     except json.JSONDecodeError as e:
