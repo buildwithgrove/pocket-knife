@@ -15,9 +15,9 @@
 
 | Command | Description | Key Features |
 |---------|-------------|--------------|
-| **fetch-suppliers** | Get all operator addresses for an owner | • Real-time display<br>• Auto sorting<br>• Progress tracking |
-| **treasury** | Comprehensive balance analysis from JSON | • Multi-type detection<br>• Beautiful tables<br>• Grand totals |
-| **unstake** | Mass-unstake multiple operator addresses | • Auto gas & fees<br>• Batch processing<br>• Success tracking |
+| **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
+| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake types<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
+| **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
 
 ## Installation
 
