@@ -109,7 +109,7 @@ The main `treasury` command automatically detects which balance types to calcula
    ```json
    {
      "liquid": [
-       "pokt193mtz7ty4w8ulapeujgf2jes68ev0dq24lt80p",
+       "pokt1la0mzur79w7vgk2stun4llqlgaqa2f3rg20jvj",
        "pokt1another5liquid6address"
      ],
      "app_stakes": [
