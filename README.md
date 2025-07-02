@@ -85,7 +85,7 @@ pipx reinstall .
 **💼 Use case:** Perfect for treasury management and bulk operations
 
 ```bash
-python -m pocketknife fetch-suppliers \
+pocketknife fetch-suppliers \
   --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r \
   --output-file ~/Desktop/operators.txt
 ```
@@ -125,7 +125,7 @@ python -m pocketknife fetch-suppliers \
 
 2. **🔍 Query liquid balances**
    ```bash
-   python -m pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
+   pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
    ```
 
 #### 🏦 App Stake Balance Calculation
@@ -133,7 +133,7 @@ python -m pocketknife fetch-suppliers \
 1. **📝 Create app stake address list**
 2. **🔍 Query app stake balances**
    ```bash
-   python -m pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
+   pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
    ```
 
 #### 🖥️ Node Stake Balance Calculation
@@ -141,7 +141,7 @@ python -m pocketknife fetch-suppliers \
 1. **📝 Create node stake address list**
 2. **🔍 Query node stake balances**
    ```bash
-   python -m pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
+   pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
    ```
 
 </details>
@@ -171,7 +171,7 @@ python -m pocketknife fetch-suppliers \
 
 2. **🚀 Execute comprehensive analysis**
    ```bash
-   python -m pocketknife treasury --file /path/to/treasury.json
+   pocketknife treasury --file /path/to/treasury.json
    ```
 
    **✨ What you get:**
@@ -194,7 +194,7 @@ python -m pocketknife fetch-suppliers \
 
 2. **🚀 Execute unstaking**
    ```bash
-   python -m pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
+   pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
    ```
 
    > ⚠️ **Note:** The signer key must exist in the `test` keyring backend.
