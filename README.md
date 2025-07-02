@@ -15,9 +15,9 @@
 
 | Command | Description | Key Features |
 |---------|-------------|--------------|
-| 🔄 **unstake** | Mass-unstake multiple operator addresses | • Auto gas & fees<br>• Batch processing<br>• Success tracking |
-| 📊 **treasury** | Comprehensive balance analysis from JSON | • Multi-type detection<br>• Beautiful tables<br>• Grand totals |
 | 🔍 **fetch-suppliers** | Get all operator addresses for an owner | • Real-time display<br>• Auto sorting<br>• Progress tracking |
+| 📊 **treasury** | Comprehensive balance analysis from JSON | • Multi-type detection<br>• Beautiful tables<br>• Grand totals |
+| 🔄 **unstake** | Mass-unstake multiple operator addresses | • Auto gas & fees<br>• Batch processing<br>• Success tracking |
 
 ### 🛠️ Treasury Tools (Optional)
 
@@ -36,7 +36,34 @@
 - 🐍 Python 3.8+
 - 🔗 `pocketd` CLI tool installed and configured
 
-### Quick Start
+### 🌍 Global Installation (Recommended)
+
+Install `pocketknife` as a global command using pipx:
+
+```bash
+# Install pipx if not already installed
+brew install pipx  # macOS
+# or: python -m pip install --user pipx  # Linux/Windows
+
+# Clone and install globally
+git clone https://github.com/yourusername/pocket-knife.git
+cd pocket-knife
+pipx install .
+```
+
+Now you can use `pocketknife` from anywhere:
+```bash
+pocketknife --help
+```
+
+**🔄 To update:**
+```bash
+cd pocket-knife
+git pull
+pipx reinstall .
+```
+
+### 🏠 Local Development Setup
 
 1. **📥 Clone the repository**
    ```bash
@@ -62,23 +89,37 @@
 
 ## 📖 Usage
 
-### 🔄 Unstaking Multiple Operators
+### 🔍 Fetching Supplier Addresses
 
-> 💡 Batch unstake operators with automatic gas optimization and error handling
+> 🎯 Discover all operator addresses owned by a specific wallet
 
-1. **📝 Create address list**
-   ```txt
-   pokt1gayzkm6ky5yyqe3267e20nukt4mxjxqyc2j92r
-   pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t
-   pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad
-   ```
+**💼 Use case:** Perfect for treasury management and bulk operations
 
-2. **🚀 Execute unstaking**
-   ```bash
-   python -m pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
-   ```
+```bash
+python -m pocketknife fetch-suppliers \
+  --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r \
+  --output-file ~/Desktop/operators.txt
+```
 
-   > ⚠️ **Note:** The signer key must exist in the `test` keyring backend.
+**🎬 Live demo output:**
+```
+🔍 Fetching suppliers for owner: pokt1meem...
+📡 Querying blockchain for all suppliers...
+🔄 Parsing supplier data...
+📊 Found 6,148 total suppliers, filtering for owner...
+  ✅ pokt1operator1address...
+  ✅ pokt1operator2address...
+  ... (670 total found)
+
+💾 Writing 670 addresses to: ~/Desktop/operators.txt
+🎉 Successfully saved 670 operator addresses!
+```
+
+**✨ Features:**
+- 🔍 **Smart filtering** from 6,000+ total suppliers
+- ⚡ **Real-time progress** with live address display  
+- 🔄 **Auto-sorting** and deduplication
+- 📁 **File management** with directory creation
 
 ### 📊 Treasury Balance Operations
 
@@ -151,37 +192,23 @@
    - 📈 **Grand total summary** across all categories
    - 🛡️ **Duplicate detection** prevents double-counting
 
-### 🔍 Fetching Supplier Addresses
+### 🔄 Unstaking Multiple Operators
 
-> 🎯 Discover all operator addresses owned by a specific wallet
+> 💡 Batch unstake operators with automatic gas optimization and error handling
 
-**💼 Use case:** Perfect for treasury management and bulk operations
+1. **📝 Create address list**
+   ```txt
+   pokt1gayzkm6ky5yyqe3267e20nukt4mxjxqyc2j92r
+   pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t
+   pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad
+   ```
 
-```bash
-python -m pocketknife fetch-suppliers \
-  --owner-address pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r \
-  --output-file ~/Desktop/operators.txt
-```
+2. **🚀 Execute unstaking**
+   ```bash
+   python -m pocketknife unstake --file /path/to/addresses.txt --signer-key YOUR_KEY_NAME
+   ```
 
-**🎬 Live demo output:**
-```
-🔍 Fetching suppliers for owner: pokt1meem...
-📡 Querying blockchain for all suppliers...
-🔄 Parsing supplier data...
-📊 Found 6,148 total suppliers, filtering for owner...
-  ✅ pokt1operator1address...
-  ✅ pokt1operator2address...
-  ... (670 total found)
-
-💾 Writing 670 addresses to: ~/Desktop/operators.txt
-🎉 Successfully saved 670 operator addresses!
-```
-
-**✨ Features:**
-- 🔍 **Smart filtering** from 6,000+ total suppliers
-- ⚡ **Real-time progress** with live address display  
-- 🔄 **Auto-sorting** and deduplication
-- 📁 **File management** with directory creation
+   > ⚠️ **Note:** The signer key must exist in the `test` keyring backend.
 
 ## ⚙️ Configuration
 
