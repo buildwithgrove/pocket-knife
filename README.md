@@ -15,6 +15,7 @@
 
 | Command | Description | Key Features |
 |---------|-------------|--------------|
+| **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
 | **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake types<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
@@ -77,6 +78,44 @@ pipx reinstall .
    ```
 
 ## Usage
+
+### Deleting Keys from Keyring
+
+> Safely delete all keys or pattern-matched keys from a specified keyring
+
+**Use case:** Perfect for cleaning up test keys or any keys containing specific patterns
+
+```bash
+# Delete all keys from default (os) keyring
+pocketknife delete-keys
+
+# Delete all keys containing 'grove-app' (e.g., grove-app0, grove-app1, grove-app-test)
+pocketknife delete-keys --pattern grove-app
+
+# Delete all keys containing 'test' from test keyring
+pocketknife delete-keys --keyring test --pattern test
+
+# Delete keys containing 'old' pattern
+pocketknife delete-keys --pattern old
+
+# Dry run to see what would be deleted without actually deleting
+pocketknife delete-keys --pattern grove-app --dry-run
+```
+
+**How pattern matching works:**
+- Lists all keys in the keyring first
+- Filters keys containing the specified pattern anywhere in the name
+- Shows exactly which keys will be deleted before confirmation
+- Supports any pattern (not limited to numbered ranges)
+
+**Safety features:**
+- **Confirmation prompt** before deletion (type 'yes' to confirm)
+- **Dry run mode** to preview operations without executing
+- **Clear warnings** about permanent deletion
+- **Progress tracking** with success/failure status
+- **Pattern preview** showing exactly which keys match
+
+**⚠️ WARNING:** This will permanently delete keys! Make sure you have backups.
 
 ### Fetching Supplier Addresses
 
