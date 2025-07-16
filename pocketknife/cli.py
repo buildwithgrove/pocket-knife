@@ -819,9 +819,15 @@ def delete_keys(
         console.print("[red]Make sure the keyring exists and is accessible.[/red]")
         raise typer.Exit(1)
     
-    # Extract key names (assuming they're in the format "- name: keyname")
-    key_lines = [line for line in result.stdout.split('\n') if line.strip().startswith('- name:')]
-    all_key_names = [line.split('- name:')[1].strip() for line in key_lines if '- name:' in line]
+    # Extract key names from YAML output format (lines with "name: keyname")
+    key_names = []
+    lines = result.stdout.split('\n')
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('name: '):
+            key_name = stripped_line.split('name: ')[1].strip()
+            key_names.append(key_name)
+    all_key_names = key_names
     
     if not all_key_names:
         console.print(f"[yellow]No keys found in keyring '{keyring_name}'[/yellow]")
