@@ -764,6 +764,141 @@ def fetch_suppliers(
 
 
 @app.command()
+def delete_keys(
+    keyring_name: str = typer.Option("os", "--keyring", help="Name of the keyring to delete keys from (default: os)"),
+    pattern: str = typer.Option(None, "--pattern", help="Delete only keys containing this pattern (e.g., 'grove-app')"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands that would be executed without running them"),
+):
+    """
+    Delete all keys or pattern-matched keys in a specified keyring using pocketd.
+    
+    WARNING: This will permanently delete keys! Make sure you have backups.
+    """
+    # Check if pocketd command is available
+    if not subprocess.run(["which", "pocketd"], capture_output=True).returncode == 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display configuration
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - Commands will be displayed but not executed[/yellow]\n")
+
+    console.print(f"[cyan]Deleting keys in keyring: {keyring_name}[/cyan]")
+    if pattern:
+        console.print(f"[cyan]Pattern: keys containing '{pattern}'[/cyan]")
+    console.print()
+
+    # Warning prompt for non-dry-run
+    if not dry_run:
+        console.print(f"[red]⚠️  WARNING: This will permanently delete keys from keyring '{keyring_name}'[/red]")
+        if pattern:
+            console.print(f"[red]    Keys to delete: all keys containing '{pattern}'[/red]")
+        else:
+            console.print("[red]    ALL keys in the keyring will be deleted[/red]")
+        
+        confirmation = typer.prompt("\nAre you sure you want to continue? (type 'yes' to confirm)")
+        if confirmation != "yes":
+            console.print("[yellow]Operation cancelled.[/yellow]")
+            raise typer.Exit(0)
+        console.print()
+
+    # Counter for tracking deletions
+    total_count = 0
+    success_count = 0
+    error_count = 0
+    not_found_count = 0
+
+    # Get list of all keys in keyring first
+    console.print(f"[yellow]Getting list of all keys in keyring '{keyring_name}'...[/yellow]")
+    
+    list_cmd = ["pocketd", "keys", "list", "--keyring-backend", keyring_name]
+    result = subprocess.run(list_cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        console.print(f"[red]Error: Failed to list keys in keyring '{keyring_name}'[/red]")
+        console.print("[red]Make sure the keyring exists and is accessible.[/red]")
+        raise typer.Exit(1)
+    
+    # Extract key names from YAML output format (lines with "name: keyname")
+    key_names = []
+    lines = result.stdout.split('\n')
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('name: '):
+            key_name = stripped_line.split('name: ')[1].strip()
+            key_names.append(key_name)
+    all_key_names = key_names
+    
+    if not all_key_names:
+        console.print(f"[yellow]No keys found in keyring '{keyring_name}'[/yellow]")
+        raise typer.Exit(0)
+    
+    # Filter keys by pattern if provided
+    if pattern:
+        key_names_to_delete = [key for key in all_key_names if pattern in key]
+        console.print(f"[cyan]Found {len(key_names_to_delete)} keys containing '{pattern}' out of {len(all_key_names)} total keys:[/cyan]")
+        if not key_names_to_delete:
+            console.print(f"[yellow]No keys found containing pattern '{pattern}'[/yellow]")
+            raise typer.Exit(0)
+    else:
+        key_names_to_delete = all_key_names
+        console.print(f"[cyan]Found {len(key_names_to_delete)} keys to delete:[/cyan]")
+    
+    # Show keys that will be deleted
+    for key_name in key_names_to_delete:
+        console.print(f"  - {key_name}")
+    console.print()
+    
+    # Delete each key
+    if pattern:
+        console.print(f"[yellow]Deleting keys containing '{pattern}'...[/yellow]")
+    else:
+        console.print("[yellow]Deleting all keys...[/yellow]")
+    console.print("----------------------------------------")
+    
+    for key_name in key_names_to_delete:
+        if key_name:
+            total_count += 1
+            
+            cmd = ["pocketd", "keys", "delete", "--keyring-backend", keyring_name, "--yes", key_name]
+            
+            if dry_run:
+                console.print(f"[{total_count}] {' '.join(cmd)}")
+            else:
+                console.print(f"[{total_count}] Deleting key: {key_name} ... ", end="")
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    success_count += 1
+                    console.print("[green]✅ Success[/green]")
+                else:
+                    error_count += 1
+                    console.print("[red]❌ Failed[/red]")
+                    console.print(f"  [red]Error: {result.stderr.strip()}[/red]")
+
+    # Display summary
+    console.print()
+    console.print("=========================================")
+    console.print("[bold]Deletion Summary:[/bold]")
+    console.print(f"Total keys processed: {total_count}")
+    if not dry_run:
+        console.print(f"Successfully deleted: {success_count}")
+        if not_found_count > 0:
+            console.print(f"Keys not found: {not_found_count}")
+        console.print(f"Failed deletions: {error_count}")
+    console.print("=========================================")
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN completed. Use the command without --dry-run to execute the deletions.[/yellow]")
+    elif error_count > 0:
+        console.print("\n[red]Some keys failed to be deleted. Please check the output above for details.[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("\n[green]All keys have been deleted successfully![/green]")
+
+
+@app.command()
 def treasury(
     addresses_file: Path = typer.Option(..., "--file", help="Path to JSON file with treasury addresses."),
     max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
