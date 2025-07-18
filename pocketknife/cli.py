@@ -16,16 +16,513 @@ treasury_app = typer.Typer(help="Specific treasury operations (use main 'treasur
 app.add_typer(treasury_app, name="treasury-tools")
 console = Console()
 
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context):
+    """
+    Pocketknife CLI: Syntactic sugar for poktroll operations.
+    
+    Available commands:
+    - delete-keys: Delete keys from keyring
+    - fetch-suppliers: Fetch supplier addresses  
+    - treasury: Calculate treasury balances
+    - unstake: Mass-unstake operations
+    - treasury-tools: Specific treasury operations
+    """
+    if ctx.invoked_subcommand is None:
+        console.print("[bold blue]Pocketknife CLI[/bold blue]")
+        console.print("Syntactic sugar for poktroll operations.\n")
+        
+        console.print("[bold]Available Commands:[/bold]")
+        console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
+        console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
+        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances") 
+        console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
+        console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
+        
+        console.print("\n[dim]Use 'pocketknife [COMMAND] --help' for more information about a command.[/dim]")
+        ctx.exit(0)
+
+@treasury_app.callback(invoke_without_command=True)
+def treasury_main(ctx: typer.Context):
+    """
+    Specific treasury operations (use main 'treasury' command for full analysis).
+    
+    Available subcommands:
+    - app-stakes: Calculate app stake balances
+    - liquid-balance: Calculate liquid balances
+    - node-stakes: Calculate node stake balances
+    """
+    if ctx.invoked_subcommand is None:
+        console.print("[bold blue]Treasury Tools[/bold blue]")
+        console.print("Specific treasury operations (use main 'treasury' command for full analysis).\n")
+        
+        console.print("[bold]Available Subcommands:[/bold]")
+        console.print("  [cyan]app-stakes[/cyan]       Calculate app stake balances")
+        console.print("  [cyan]liquid-balance[/cyan]   Calculate liquid balances")
+        console.print("  [cyan]node-stakes[/cyan]      Calculate node stake balances")
+        
+        console.print("\n[dim]Use 'pocketknife treasury-tools [SUBCOMMAND] --help' for more information.[/dim]")
+        ctx.exit(0)
+
+@app.command()
+def delete_keys(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands that would be executed without running them"),
+    keyring_name: str = typer.Option("os", "--keyring", help="Name of the keyring to delete keys from (default: os)"),
+    pattern: str = typer.Option(None, "--pattern", help="Delete only keys containing this pattern (e.g., 'grove-app')"),
+):
+    """
+    Delete all keys or pattern-matched keys in a specified keyring using pocketd.
+    
+    WARNING: This will permanently delete keys! Make sure you have backups.
+    
+    Optional options:
+    --dry-run: Show commands that would be executed without running them
+    --keyring: Name of the keyring to delete keys from (default: os)
+    --pattern: Delete only keys containing this pattern (e.g., 'grove-app')
+    """
+    # Check if pocketd command is available
+    if not subprocess.run(["which", "pocketd"], capture_output=True).returncode == 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display configuration
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - Commands will be displayed but not executed[/yellow]\n")
+
+    console.print(f"[cyan]Deleting keys in keyring: {keyring_name}[/cyan]")
+    if pattern:
+        console.print(f"[cyan]Pattern: keys containing '{pattern}'[/cyan]")
+    console.print()
+
+    # Warning prompt for non-dry-run
+    if not dry_run:
+        console.print(f"[red]⚠️  WARNING: This will permanently delete keys from keyring '{keyring_name}'[/red]")
+        if pattern:
+            console.print(f"[red]    Keys to delete: all keys containing '{pattern}'[/red]")
+        else:
+            console.print("[red]    ALL keys in the keyring will be deleted[/red]")
+        
+        confirmation = typer.prompt("\nAre you sure you want to continue? (type 'yes' to confirm)")
+        if confirmation != "yes":
+            console.print("[yellow]Operation cancelled.[/yellow]")
+            raise typer.Exit(0)
+        console.print()
+
+    # Counter for tracking deletions
+    total_count = 0
+    success_count = 0
+    error_count = 0
+    not_found_count = 0
+
+    # Get list of all keys in keyring first
+    console.print(f"[yellow]Getting list of all keys in keyring '{keyring_name}'...[/yellow]")
+    
+    list_cmd = ["pocketd", "keys", "list", "--keyring-backend", keyring_name]
+    result = subprocess.run(list_cmd, capture_output=True, text=True)
+    
+    if result.returncode != 0:
+        console.print(f"[red]Error: Failed to list keys in keyring '{keyring_name}'[/red]")
+        console.print("[red]Make sure the keyring exists and is accessible.[/red]")
+        raise typer.Exit(1)
+    
+    # Extract key names from YAML output format (lines with "name: keyname")
+    key_names = []
+    lines = result.stdout.split('\n')
+    for line in lines:
+        stripped_line = line.strip()
+        if stripped_line.startswith('name: '):
+            key_name = stripped_line.split('name: ')[1].strip()
+            key_names.append(key_name)
+    all_key_names = key_names
+    
+    if not all_key_names:
+        console.print(f"[yellow]No keys found in keyring '{keyring_name}'[/yellow]")
+        raise typer.Exit(0)
+    
+    # Filter keys by pattern if provided
+    if pattern:
+        key_names_to_delete = [key for key in all_key_names if pattern in key]
+        console.print(f"[cyan]Found {len(key_names_to_delete)} keys containing '{pattern}' out of {len(all_key_names)} total keys:[/cyan]")
+        if not key_names_to_delete:
+            console.print(f"[yellow]No keys found containing pattern '{pattern}'[/yellow]")
+            raise typer.Exit(0)
+    else:
+        key_names_to_delete = all_key_names
+        console.print(f"[cyan]Found {len(key_names_to_delete)} keys to delete:[/cyan]")
+    
+    # Show keys that will be deleted
+    for key_name in key_names_to_delete:
+        console.print(f"  - {key_name}")
+    console.print()
+    
+    # Delete each key
+    if pattern:
+        console.print(f"[yellow]Deleting keys containing '{pattern}'...[/yellow]")
+    else:
+        console.print("[yellow]Deleting all keys...[/yellow]")
+    console.print("----------------------------------------")
+    
+    for key_name in key_names_to_delete:
+        if key_name:
+            total_count += 1
+            
+            cmd = ["pocketd", "keys", "delete", "--keyring-backend", keyring_name, "--yes", key_name]
+            
+            if dry_run:
+                console.print(f"[{total_count}] {' '.join(cmd)}")
+            else:
+                console.print(f"[{total_count}] Deleting key: {key_name} ... ", end="")
+                
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0:
+                    success_count += 1
+                    console.print("[green]✅ Success[/green]")
+                else:
+                    error_count += 1
+                    console.print("[red]❌ Failed[/red]")
+                    console.print(f"  [red]Error: {result.stderr.strip()}[/red]")
+
+    # Display summary
+    console.print()
+    console.print("=========================================")
+    console.print("[bold]Deletion Summary:[/bold]")
+    console.print(f"Total keys processed: {total_count}")
+    if not dry_run:
+        console.print(f"Successfully deleted: {success_count}")
+        if not_found_count > 0:
+            console.print(f"Keys not found: {not_found_count}")
+        console.print(f"Failed deletions: {error_count}")
+    console.print("=========================================")
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN completed. Use the command without --dry-run to execute the deletions.[/yellow]")
+    elif error_count > 0:
+        console.print("\n[red]Some keys failed to be deleted. Please check the output above for details.[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("\n[green]All keys have been deleted successfully![/green]")
+
+
+@app.command()
+def fetch_suppliers(
+    ctx: typer.Context,
+    output_file: Path = typer.Option(None, "--output-file", help="Path to save the operator addresses"),
+    owner_address: str = typer.Option(None, "--owner-address", help="Owner address to fetch suppliers for"),
+):
+    """
+    Fetch all supplier operator addresses for a given owner address and save to file.
+    
+    Required options:
+    --owner-address: Owner address to fetch suppliers for
+    --output-file: Path to save the operator addresses
+    """
+    # Check for missing required options
+    if output_file is None or owner_address is None:
+        console.print("[red]Error: Missing required options[/red]\n")
+        console.print("[bold]Fetch Suppliers Command Help:[/bold]")
+        console.print("Fetch all supplier operator addresses for a given owner address and save to file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--owner-address[/cyan]  Owner address to fetch suppliers for")
+        console.print("  [cyan]--output-file[/cyan]    Path to save the operator addresses")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife fetch-suppliers --owner-address pokt1abc123... --output-file suppliers.txt")
+        console.print("\n[dim]Use 'pocketknife fetch-suppliers --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
+    # Validate owner address format
+    if not owner_address.startswith("pokt1") or len(owner_address) != 43:
+        console.print(f"[red]Invalid owner address format:[/red] {owner_address}")
+        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
+        raise typer.Exit(1)
+    
+    # Fetch suppliers
+    operator_addresses = fetch_suppliers_for_owner(owner_address)
+    
+    if not operator_addresses:
+        console.print(f"[red]No suppliers found for owner address: {owner_address}[/red]")
+        console.print("[yellow]This address may not own any supplier nodes.[/yellow]")
+        raise typer.Exit(1)
+    
+    # Write to file
+    try:
+        console.print(f"\n[yellow]Writing {len(operator_addresses)} addresses to: {output_file}[/yellow]")
+        
+        # Create parent directory if it doesn't exist
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        with output_file.open('w') as f:
+            for addr in operator_addresses:
+                f.write(f"{addr}\n")
+        
+        console.print(f"[green]✓ Successfully saved {len(operator_addresses)} operator addresses to {output_file}[/green]")
+        
+    except Exception as e:
+        console.print(f"[red]Error writing to file:[/red] {e}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def treasury(
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to JSON file with treasury addresses."),
+    max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
+):
+    """
+    Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.
+    Uses parallel processing for significantly faster execution.
+    Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...]}
+    
+    Required options:
+    --file: Path to JSON file with treasury addresses
+    
+    Optional options:
+    --max-workers: Maximum concurrent requests (default: 10)
+    """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Treasury Command Help:[/bold]")
+        console.print("Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]        Path to JSON file with treasury addresses")
+        console.print("\n[bold]Optional Options:[/bold]")
+        console.print("  [cyan]--max-workers[/cyan]  Maximum concurrent requests (default: 10)")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife treasury --file treasury_addresses.json")
+        console.print("  pocketknife treasury --file treasury_addresses.json --max-workers 20")
+        console.print("\n[dim]Use 'pocketknife treasury --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
+    if not addresses_file.exists():
+        console.print(f"[red]File not found:[/red] {addresses_file}")
+        raise typer.Exit(1)
+
+    treasury_data = load_treasury_addresses(addresses_file)
+    
+    # Get address lists
+    liquid_addresses = treasury_data.get("liquid", [])
+    app_stake_addresses = treasury_data.get("app_stakes", [])
+    node_stake_addresses = treasury_data.get("node_stakes", [])
+    
+    # Display execution plan
+    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses)
+    console.print(f"[bold blue]Starting parallel treasury analysis...[/bold blue]")
+    console.print(f"[dim]Total addresses: {total_addresses} | Max workers: {max_workers}[/dim]")
+    
+    # Run all categories in parallel
+    futures = {}
+    results = {}
+    
+    with ThreadPoolExecutor(max_workers=3) as category_executor:  # One worker per category
+        # Submit category-level tasks
+        if liquid_addresses:
+            console.print(f"[yellow]Querying {len(liquid_addresses)} liquid addresses...[/yellow]")
+            futures['liquid'] = category_executor.submit(query_liquid_balances_parallel, liquid_addresses, max_workers)
+        
+        if app_stake_addresses:
+            console.print(f"[yellow]Querying {len(app_stake_addresses)} app stake addresses...[/yellow]")
+            futures['app_stakes'] = category_executor.submit(query_app_stakes_parallel, app_stake_addresses, max_workers)
+        
+        if node_stake_addresses:
+            console.print(f"[yellow]Querying {len(node_stake_addresses)} node stake addresses...[/yellow]")
+            futures['node_stakes'] = category_executor.submit(query_node_stakes_parallel, node_stake_addresses, max_workers)
+        
+        # Collect results as they complete
+        for category in futures:
+            results[category] = futures[category].result()
+    
+    console.print(f"[green]✓ All queries completed![/green]\n")
+    
+    # Display results for liquid addresses
+    total_liquid_all = 0.0
+    if liquid_addresses and 'liquid' in results:
+        liquid_data = results['liquid']
+        total_liquid_all = liquid_data['total_balance']
+        
+        # Create liquid table
+        liquid_table = Table(title="Liquid Balance Report")
+        liquid_table.add_column("Address", style="cyan", no_wrap=True)
+        liquid_table.add_column("Balance (POKT)", justify="right", style="green")
+        liquid_table.add_column("Status", justify="center")
+        
+        # Add successful results
+        for address, balance in liquid_data['results'].items():
+            liquid_table.add_row(
+                address,
+                f"{balance:,.2f}",
+                "[green]✓[/green]"
+            )
+        
+        # Add failed results
+        for address, error in liquid_data['failed']:
+            liquid_table.add_row(
+                address,
+                "0.00",
+                "[red]✗[/red]"
+            )
+        
+        # Add total
+        liquid_table.add_section()
+        liquid_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{total_liquid_all:,.2f}[/bold green]",
+            f"[dim]{len(liquid_data['results'])}/{len(liquid_addresses)}[/dim]"
+        )
+        
+        console.print(liquid_table)
+        
+        if liquid_data['failed']:
+            console.print(f"\n[red]Failed liquid queries ({len(liquid_data['failed'])}):[/red]")
+            for address, error in liquid_data['failed']:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    
+    # Display results for app stake addresses
+    total_app_stakes = 0.0
+    if app_stake_addresses and 'app_stakes' in results:
+        app_data = results['app_stakes']
+        total_app_stakes = app_data['total_combined']
+        
+        # Create app stakes table
+        app_table = Table(title="App Stake Balance Report")
+        app_table.add_column("Address", style="cyan", no_wrap=True)
+        app_table.add_column("Liquid (POKT)", justify="right", style="green")
+        app_table.add_column("Staked (POKT)", justify="right", style="blue")
+        app_table.add_column("Total (POKT)", justify="right", style="magenta")
+        app_table.add_column("Status", justify="center")
+        
+        # Add successful results
+        for address, balance_data in app_data['results'].items():
+            app_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['staked']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
+        
+        # Add failed results
+        for address, error in app_data['failed']:
+            app_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
+        
+        # Add total
+        app_table.add_section()
+        app_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{app_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold blue]{app_data['total_staked']:,.2f}[/bold blue]",
+            f"[bold magenta]{total_app_stakes:,.2f}[/bold magenta]",
+            f"[dim]{len(app_data['results'])}/{len(app_stake_addresses)}[/dim]"
+        )
+        
+        console.print("\n")
+        console.print(app_table)
+        
+        if app_data['failed']:
+            console.print(f"\n[red]Failed app stake queries ({len(app_data['failed'])}):[/red]")
+            for address, error in app_data['failed']:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    
+    # Display results for node stake addresses
+    total_node_stakes = 0.0
+    if node_stake_addresses and 'node_stakes' in results:
+        node_data = results['node_stakes']
+        total_node_stakes = node_data['total_combined']
+        
+        # Create node stakes table
+        node_table = Table(title="Node Stake Balance Report")
+        node_table.add_column("Address", style="cyan", no_wrap=True)
+        node_table.add_column("Liquid (POKT)", justify="right", style="green")
+        node_table.add_column("Staked (POKT)", justify="right", style="blue")
+        node_table.add_column("Total (POKT)", justify="right", style="magenta")
+        node_table.add_column("Status", justify="center")
+        
+        # Add successful results
+        for address, balance_data in node_data['results'].items():
+            node_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['staked']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
+        
+        # Add failed results
+        for address, error in node_data['failed']:
+            node_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
+        
+        # Add total
+        node_table.add_section()
+        node_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{node_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold blue]{node_data['total_staked']:,.2f}[/bold blue]",
+            f"[bold magenta]{total_node_stakes:,.2f}[/bold magenta]",
+            f"[dim]{len(node_data['results'])}/{len(node_stake_addresses)}[/dim]"
+        )
+        
+        console.print("\n")
+        console.print(node_table)
+        
+        if node_data['failed']:
+            console.print(f"\n[red]Failed node stake queries ({len(node_data['failed'])}):[/red]")
+            for address, error in node_data['failed']:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    
+    # Grand total summary
+    grand_total = total_liquid_all + total_app_stakes + total_node_stakes
+    
+    console.print("\n" + "="*60)
+    console.print("[bold]TREASURY SUMMARY[/bold]")
+    console.print("="*60)
+    console.print(f"[green]Liquid Balances:[/green]     {total_liquid_all:>15,.2f} POKT")
+    console.print(f"[blue]App Stake Balances:[/blue]   {total_app_stakes:>15,.2f} POKT")
+    console.print(f"[blue]Node Stake Balances:[/blue]   {total_node_stakes:>15,.2f} POKT")
+    console.print("-" * 60)
+    console.print(f"[bold magenta]GRAND TOTAL:[/bold magenta]        {grand_total:>15,.2f} POKT")
+    console.print("="*60)
+
+
 @app.command()
 def unstake(
-    operator_addresses_file: Path = typer.Option(..., "--file", help="Path to file with operator addresses, one per line."),
-    signer_key: str = typer.Option(..., "--signer-key", help="Keyring name to use for signing. This key must exist in the 'test' keyring."),
+    ctx: typer.Context,
+    operator_addresses_file: Path = typer.Option(None, "--file", help="Path to file with operator addresses, one per line."),
+    signer_key: str = typer.Option(None, "--signer-key", help="Keyring name to use for signing. This key must exist in the 'test' keyring."),
 ):
     """
     Mass-unstake operator addresses listed in a file.
 
     Note: The signer-key must exist in the 'test' keyring backend, as this tool always uses --keyring-backend=test.
+    
+    Required options:
+    --file: Path to file with operator addresses, one per line
+    --signer-key: Keyring name to use for signing (must exist in 'test' keyring)
     """
+    # Check for missing required options
+    if operator_addresses_file is None or signer_key is None:
+        console.print("[red]Error: Missing required options[/red]\n")
+        console.print("[bold]Unstake Command Help:[/bold]")
+        console.print("Mass-unstake operator addresses listed in a file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]        Path to file with operator addresses, one per line")
+        console.print("  [cyan]--signer-key[/cyan]  Keyring name to use for signing (must exist in 'test' keyring)")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife unstake --file operators.txt --signer-key my-key")
+        console.print("\n[yellow]Note: The signer-key must exist in the 'test' keyring backend.[/yellow]")
+        console.print("\n[dim]Use 'pocketknife unstake --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
     home = Path("~/.pocket/").expanduser()
     if not operator_addresses_file.exists():
         console.print(f"[red]File not found:[/red] {operator_addresses_file}")
@@ -342,12 +839,126 @@ def query_node_stakes_parallel(addresses: list[str], max_workers: int = 10) -> d
 
 
 @treasury_app.command()
+def app_stakes(
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+):
+    """
+    Calculate app stake balances (liquid + staked) for addresses listed in a file.
+    
+    Required options:
+    --file: Path to file with addresses, one per line
+    """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]App Stakes Command Help:[/bold]")
+        console.print("Calculate app stake balances (liquid + staked) for addresses listed in a file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to file with addresses, one per line")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife treasury-tools app-stakes --file addresses.txt")
+        console.print("\n[dim]Use 'pocketknife treasury-tools app-stakes --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
+    if not addresses_file.exists():
+        console.print(f"[red]File not found:[/red] {addresses_file}")
+        raise typer.Exit(1)
+
+    with addresses_file.open() as f:
+        addresses = [line.strip() for line in f if line.strip()]
+
+    if not addresses:
+        console.print("[red]No addresses found in the file. Exiting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Querying app stake balances for {len(addresses)} addresses...[/yellow]")
+    
+    # Create table for results
+    table = Table(title="App Stake Balance Report")
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Liquid (POKT)", justify="right", style="green")
+    table.add_column("Staked (POKT)", justify="right", style="blue")
+    table.add_column("Total (POKT)", justify="right", style="magenta")
+    table.add_column("Status", justify="center")
+    
+    successful_queries = []
+    failed_addresses = []
+    total_liquid = 0.0
+    total_staked = 0.0
+    
+    for i, address in enumerate(addresses, 1):
+        console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
+        
+        liquid_balance, staked_balance, success, error = get_app_stake_balance(address)
+        total_balance = liquid_balance + staked_balance
+        
+        if success:
+            successful_queries.append((address, liquid_balance, staked_balance, total_balance))
+            total_liquid += liquid_balance
+            total_staked += staked_balance
+            table.add_row(
+                address,
+                f"{liquid_balance:,.2f}",
+                f"{staked_balance:,.2f}",
+                f"{total_balance:,.2f}",
+                "[green]✓[/green]"
+            )
+        else:
+            failed_addresses.append((address, error))
+            table.add_row(
+                address,
+                "0.00",
+                "0.00", 
+                "0.00",
+                "[red]✗[/red]"
+            )
+    
+    # Add separator row and totals
+    table.add_section()
+    grand_total = total_liquid + total_staked
+    table.add_row(
+        "[bold]TOTAL[/bold]",
+        f"[bold green]{total_liquid:,.2f}[/bold green]",
+        f"[bold blue]{total_staked:,.2f}[/bold blue]",
+        f"[bold magenta]{grand_total:,.2f}[/bold magenta]",
+        f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
+    )
+    
+    # Display results table
+    console.print("\n")
+    console.print(table)
+    
+    console.print(f"[dim]Successfully queried: {len(successful_queries)}/{len(addresses)} addresses[/dim]")
+    
+    # Show failed addresses if any
+    if failed_addresses:
+        console.print(f"\n[red]Failed to query {len(failed_addresses)} addresses:[/red]")
+        for address, error in failed_addresses:
+            console.print(f"  [red]•[/red] {address}: {error}")
+
+
+@treasury_app.command()
 def liquid_balance(
-    addresses_file: Path = typer.Option(..., "--file", help="Path to file with addresses, one per line."),
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
 ):
     """
     Calculate liquid balance for addresses listed in a file.
+    
+    Required options:
+    --file: Path to file with addresses, one per line
     """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Liquid Balance Command Help:[/bold]")
+        console.print("Calculate liquid balance for addresses listed in a file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to file with addresses, one per line")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife treasury-tools liquid-balance --file addresses.txt")
+        console.print("\n[dim]Use 'pocketknife treasury-tools liquid-balance --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
     if not addresses_file.exists():
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
@@ -415,11 +1026,26 @@ def liquid_balance(
 
 @treasury_app.command()
 def node_stakes(
-    addresses_file: Path = typer.Option(..., "--file", help="Path to file with addresses, one per line."),
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
 ):
     """
     Calculate node stake balances (liquid + staked) for addresses listed in a file.
+    
+    Required options:
+    --file: Path to file with addresses, one per line
     """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Node Stakes Command Help:[/bold]")
+        console.print("Calculate node stake balances (liquid + staked) for addresses listed in a file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to file with addresses, one per line")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife treasury-tools node-stakes --file addresses.txt")
+        console.print("\n[dim]Use 'pocketknife treasury-tools node-stakes --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
     if not addresses_file.exists():
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
@@ -450,90 +1076,6 @@ def node_stakes(
         console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
         
         liquid_balance, staked_balance, success, error = get_node_stake_balance(address)
-        total_balance = liquid_balance + staked_balance
-        
-        if success:
-            successful_queries.append((address, liquid_balance, staked_balance, total_balance))
-            total_liquid += liquid_balance
-            total_staked += staked_balance
-            table.add_row(
-                address,
-                f"{liquid_balance:,.2f}",
-                f"{staked_balance:,.2f}",
-                f"{total_balance:,.2f}",
-                "[green]✓[/green]"
-            )
-        else:
-            failed_addresses.append((address, error))
-            table.add_row(
-                address,
-                "0.00",
-                "0.00", 
-                "0.00",
-                "[red]✗[/red]"
-            )
-    
-    # Add separator row and totals
-    table.add_section()
-    grand_total = total_liquid + total_staked
-    table.add_row(
-        "[bold]TOTAL[/bold]",
-        f"[bold green]{total_liquid:,.2f}[/bold green]",
-        f"[bold blue]{total_staked:,.2f}[/bold blue]",
-        f"[bold magenta]{grand_total:,.2f}[/bold magenta]",
-        f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
-    )
-    
-    # Display results table
-    console.print("\n")
-    console.print(table)
-    
-    console.print(f"[dim]Successfully queried: {len(successful_queries)}/{len(addresses)} addresses[/dim]")
-    
-    # Show failed addresses if any
-    if failed_addresses:
-        console.print(f"\n[red]Failed to query {len(failed_addresses)} addresses:[/red]")
-        for address, error in failed_addresses:
-            console.print(f"  [red]•[/red] {address}: {error}")
-
-
-@treasury_app.command()
-def app_stakes(
-    addresses_file: Path = typer.Option(..., "--file", help="Path to file with addresses, one per line."),
-):
-    """
-    Calculate app stake balances (liquid + staked) for addresses listed in a file.
-    """
-    if not addresses_file.exists():
-        console.print(f"[red]File not found:[/red] {addresses_file}")
-        raise typer.Exit(1)
-
-    with addresses_file.open() as f:
-        addresses = [line.strip() for line in f if line.strip()]
-
-    if not addresses:
-        console.print("[red]No addresses found in the file. Exiting.[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[yellow]Querying app stake balances for {len(addresses)} addresses...[/yellow]")
-    
-    # Create table for results
-    table = Table(title="App Stake Balance Report")
-    table.add_column("Address", style="cyan", no_wrap=True)
-    table.add_column("Liquid (POKT)", justify="right", style="green")
-    table.add_column("Staked (POKT)", justify="right", style="blue")
-    table.add_column("Total (POKT)", justify="right", style="magenta")
-    table.add_column("Status", justify="center")
-    
-    successful_queries = []
-    failed_addresses = []
-    total_liquid = 0.0
-    total_staked = 0.0
-    
-    for i, address in enumerate(addresses, 1):
-        console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
-        
-        liquid_balance, staked_balance, success, error = get_app_stake_balance(address)
         total_balance = liquid_balance + staked_balance
         
         if success:
@@ -723,388 +1265,4 @@ def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
         raise typer.Exit(1)
 
 
-@app.command()
-def fetch_suppliers(
-    owner_address: str = typer.Option(..., "--owner-address", help="Owner address to fetch suppliers for"),
-    output_file: Path = typer.Option(..., "--output-file", help="Path to save the operator addresses"),
-):
-    """
-    Fetch all supplier operator addresses for a given owner address and save to file.
-    """
-    # Validate owner address format
-    if not owner_address.startswith("pokt1") or len(owner_address) != 43:
-        console.print(f"[red]Invalid owner address format:[/red] {owner_address}")
-        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
-        raise typer.Exit(1)
-    
-    # Fetch suppliers
-    operator_addresses = fetch_suppliers_for_owner(owner_address)
-    
-    if not operator_addresses:
-        console.print(f"[red]No suppliers found for owner address: {owner_address}[/red]")
-        console.print("[yellow]This address may not own any supplier nodes.[/yellow]")
-        raise typer.Exit(1)
-    
-    # Write to file
-    try:
-        console.print(f"\n[yellow]Writing {len(operator_addresses)} addresses to: {output_file}[/yellow]")
-        
-        # Create parent directory if it doesn't exist
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        
-        with output_file.open('w') as f:
-            for addr in operator_addresses:
-                f.write(f"{addr}\n")
-        
-        console.print(f"[green]✓ Successfully saved {len(operator_addresses)} operator addresses to {output_file}[/green]")
-        
-    except Exception as e:
-        console.print(f"[red]Error writing to file:[/red] {e}")
-        raise typer.Exit(1)
-
-
-@app.command()
-def delete_keys(
-    keyring_name: str = typer.Option("os", "--keyring", help="Name of the keyring to delete keys from (default: os)"),
-    pattern: str = typer.Option(None, "--pattern", help="Delete only keys containing this pattern (e.g., 'grove-app')"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands that would be executed without running them"),
-):
-    """
-    Delete all keys or pattern-matched keys in a specified keyring using pocketd.
-    
-    WARNING: This will permanently delete keys! Make sure you have backups.
-    """
-    # Check if pocketd command is available
-    if not subprocess.run(["which", "pocketd"], capture_output=True).returncode == 0:
-        console.print("[red]Error: pocketd command not found.[/red]")
-        raise typer.Exit(1)
-
-    # Display configuration
-    if dry_run:
-        console.print("[yellow]DRY RUN MODE - Commands will be displayed but not executed[/yellow]\n")
-
-    console.print(f"[cyan]Deleting keys in keyring: {keyring_name}[/cyan]")
-    if pattern:
-        console.print(f"[cyan]Pattern: keys containing '{pattern}'[/cyan]")
-    console.print()
-
-    # Warning prompt for non-dry-run
-    if not dry_run:
-        console.print(f"[red]⚠️  WARNING: This will permanently delete keys from keyring '{keyring_name}'[/red]")
-        if pattern:
-            console.print(f"[red]    Keys to delete: all keys containing '{pattern}'[/red]")
-        else:
-            console.print("[red]    ALL keys in the keyring will be deleted[/red]")
-        
-        confirmation = typer.prompt("\nAre you sure you want to continue? (type 'yes' to confirm)")
-        if confirmation != "yes":
-            console.print("[yellow]Operation cancelled.[/yellow]")
-            raise typer.Exit(0)
-        console.print()
-
-    # Counter for tracking deletions
-    total_count = 0
-    success_count = 0
-    error_count = 0
-    not_found_count = 0
-
-    # Get list of all keys in keyring first
-    console.print(f"[yellow]Getting list of all keys in keyring '{keyring_name}'...[/yellow]")
-    
-    list_cmd = ["pocketd", "keys", "list", "--keyring-backend", keyring_name]
-    result = subprocess.run(list_cmd, capture_output=True, text=True)
-    
-    if result.returncode != 0:
-        console.print(f"[red]Error: Failed to list keys in keyring '{keyring_name}'[/red]")
-        console.print("[red]Make sure the keyring exists and is accessible.[/red]")
-        raise typer.Exit(1)
-    
-    # Extract key names from YAML output format (lines with "name: keyname")
-    key_names = []
-    lines = result.stdout.split('\n')
-    for line in lines:
-        stripped_line = line.strip()
-        if stripped_line.startswith('name: '):
-            key_name = stripped_line.split('name: ')[1].strip()
-            key_names.append(key_name)
-    all_key_names = key_names
-    
-    if not all_key_names:
-        console.print(f"[yellow]No keys found in keyring '{keyring_name}'[/yellow]")
-        raise typer.Exit(0)
-    
-    # Filter keys by pattern if provided
-    if pattern:
-        key_names_to_delete = [key for key in all_key_names if pattern in key]
-        console.print(f"[cyan]Found {len(key_names_to_delete)} keys containing '{pattern}' out of {len(all_key_names)} total keys:[/cyan]")
-        if not key_names_to_delete:
-            console.print(f"[yellow]No keys found containing pattern '{pattern}'[/yellow]")
-            raise typer.Exit(0)
-    else:
-        key_names_to_delete = all_key_names
-        console.print(f"[cyan]Found {len(key_names_to_delete)} keys to delete:[/cyan]")
-    
-    # Show keys that will be deleted
-    for key_name in key_names_to_delete:
-        console.print(f"  - {key_name}")
-    console.print()
-    
-    # Delete each key
-    if pattern:
-        console.print(f"[yellow]Deleting keys containing '{pattern}'...[/yellow]")
-    else:
-        console.print("[yellow]Deleting all keys...[/yellow]")
-    console.print("----------------------------------------")
-    
-    for key_name in key_names_to_delete:
-        if key_name:
-            total_count += 1
-            
-            cmd = ["pocketd", "keys", "delete", "--keyring-backend", keyring_name, "--yes", key_name]
-            
-            if dry_run:
-                console.print(f"[{total_count}] {' '.join(cmd)}")
-            else:
-                console.print(f"[{total_count}] Deleting key: {key_name} ... ", end="")
-                
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                if result.returncode == 0:
-                    success_count += 1
-                    console.print("[green]✅ Success[/green]")
-                else:
-                    error_count += 1
-                    console.print("[red]❌ Failed[/red]")
-                    console.print(f"  [red]Error: {result.stderr.strip()}[/red]")
-
-    # Display summary
-    console.print()
-    console.print("=========================================")
-    console.print("[bold]Deletion Summary:[/bold]")
-    console.print(f"Total keys processed: {total_count}")
-    if not dry_run:
-        console.print(f"Successfully deleted: {success_count}")
-        if not_found_count > 0:
-            console.print(f"Keys not found: {not_found_count}")
-        console.print(f"Failed deletions: {error_count}")
-    console.print("=========================================")
-
-    if dry_run:
-        console.print("\n[yellow]DRY RUN completed. Use the command without --dry-run to execute the deletions.[/yellow]")
-    elif error_count > 0:
-        console.print("\n[red]Some keys failed to be deleted. Please check the output above for details.[/red]")
-        raise typer.Exit(1)
-    else:
-        console.print("\n[green]All keys have been deleted successfully![/green]")
-
-
-@app.command()
-def treasury(
-    addresses_file: Path = typer.Option(..., "--file", help="Path to JSON file with treasury addresses."),
-    max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
-):
-    """
-    Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.
-    Uses parallel processing for significantly faster execution.
-    Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...]}
-    """
-    if not addresses_file.exists():
-        console.print(f"[red]File not found:[/red] {addresses_file}")
-        raise typer.Exit(1)
-
-    treasury_data = load_treasury_addresses(addresses_file)
-    
-    # Get address lists
-    liquid_addresses = treasury_data.get("liquid", [])
-    app_stake_addresses = treasury_data.get("app_stakes", [])
-    node_stake_addresses = treasury_data.get("node_stakes", [])
-    
-    # Display execution plan
-    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses)
-    console.print(f"[bold blue]Starting parallel treasury analysis...[/bold blue]")
-    console.print(f"[dim]Total addresses: {total_addresses} | Max workers: {max_workers}[/dim]")
-    
-    # Run all categories in parallel
-    futures = {}
-    results = {}
-    
-    with ThreadPoolExecutor(max_workers=3) as category_executor:  # One worker per category
-        # Submit category-level tasks
-        if liquid_addresses:
-            console.print(f"[yellow]Querying {len(liquid_addresses)} liquid addresses...[/yellow]")
-            futures['liquid'] = category_executor.submit(query_liquid_balances_parallel, liquid_addresses, max_workers)
-        
-        if app_stake_addresses:
-            console.print(f"[yellow]Querying {len(app_stake_addresses)} app stake addresses...[/yellow]")
-            futures['app_stakes'] = category_executor.submit(query_app_stakes_parallel, app_stake_addresses, max_workers)
-        
-        if node_stake_addresses:
-            console.print(f"[yellow]Querying {len(node_stake_addresses)} node stake addresses...[/yellow]")
-            futures['node_stakes'] = category_executor.submit(query_node_stakes_parallel, node_stake_addresses, max_workers)
-        
-        # Collect results as they complete
-        for category in futures:
-            results[category] = futures[category].result()
-    
-    console.print(f"[green]✓ All queries completed![/green]\n")
-    
-    # Display results for liquid addresses
-    total_liquid_all = 0.0
-    if liquid_addresses and 'liquid' in results:
-        liquid_data = results['liquid']
-        total_liquid_all = liquid_data['total_balance']
-        
-        # Create liquid table
-        liquid_table = Table(title="Liquid Balance Report")
-        liquid_table.add_column("Address", style="cyan", no_wrap=True)
-        liquid_table.add_column("Balance (POKT)", justify="right", style="green")
-        liquid_table.add_column("Status", justify="center")
-        
-        # Add successful results
-        for address, balance in liquid_data['results'].items():
-            liquid_table.add_row(
-                address,
-                f"{balance:,.2f}",
-                "[green]✓[/green]"
-            )
-        
-        # Add failed results
-        for address, error in liquid_data['failed']:
-            liquid_table.add_row(
-                address,
-                "0.00",
-                "[red]✗[/red]"
-            )
-        
-        # Add total
-        liquid_table.add_section()
-        liquid_table.add_row(
-            "[bold]TOTAL[/bold]",
-            f"[bold green]{total_liquid_all:,.2f}[/bold green]",
-            f"[dim]{len(liquid_data['results'])}/{len(liquid_addresses)}[/dim]"
-        )
-        
-        console.print(liquid_table)
-        
-        if liquid_data['failed']:
-            console.print(f"\n[red]Failed liquid queries ({len(liquid_data['failed'])}):[/red]")
-            for address, error in liquid_data['failed']:
-                console.print(f"  [red]•[/red] {address}: {error}")
-    
-    # Display results for app stake addresses
-    total_app_stakes = 0.0
-    if app_stake_addresses and 'app_stakes' in results:
-        app_data = results['app_stakes']
-        total_app_stakes = app_data['total_combined']
-        
-        # Create app stakes table
-        app_table = Table(title="App Stake Balance Report")
-        app_table.add_column("Address", style="cyan", no_wrap=True)
-        app_table.add_column("Liquid (POKT)", justify="right", style="green")
-        app_table.add_column("Staked (POKT)", justify="right", style="blue")
-        app_table.add_column("Total (POKT)", justify="right", style="magenta")
-        app_table.add_column("Status", justify="center")
-        
-        # Add successful results
-        for address, balance_data in app_data['results'].items():
-            app_table.add_row(
-                address,
-                f"{balance_data['liquid']:,.2f}",
-                f"{balance_data['staked']:,.2f}",
-                f"{balance_data['total']:,.2f}",
-                "[green]✓[/green]"
-            )
-        
-        # Add failed results
-        for address, error in app_data['failed']:
-            app_table.add_row(
-                address,
-                "0.00",
-                "0.00",
-                "0.00",
-                "[red]✗[/red]"
-            )
-        
-        # Add total
-        app_table.add_section()
-        app_table.add_row(
-            "[bold]TOTAL[/bold]",
-            f"[bold green]{app_data['total_liquid']:,.2f}[/bold green]",
-            f"[bold blue]{app_data['total_staked']:,.2f}[/bold blue]",
-            f"[bold magenta]{total_app_stakes:,.2f}[/bold magenta]",
-            f"[dim]{len(app_data['results'])}/{len(app_stake_addresses)}[/dim]"
-        )
-        
-        console.print("\n")
-        console.print(app_table)
-        
-        if app_data['failed']:
-            console.print(f"\n[red]Failed app stake queries ({len(app_data['failed'])}):[/red]")
-            for address, error in app_data['failed']:
-                console.print(f"  [red]•[/red] {address}: {error}")
-    
-    # Display results for node stake addresses
-    total_node_stakes = 0.0
-    if node_stake_addresses and 'node_stakes' in results:
-        node_data = results['node_stakes']
-        total_node_stakes = node_data['total_combined']
-        
-        # Create node stakes table
-        node_table = Table(title="Node Stake Balance Report")
-        node_table.add_column("Address", style="cyan", no_wrap=True)
-        node_table.add_column("Liquid (POKT)", justify="right", style="green")
-        node_table.add_column("Staked (POKT)", justify="right", style="blue")
-        node_table.add_column("Total (POKT)", justify="right", style="magenta")
-        node_table.add_column("Status", justify="center")
-        
-        # Add successful results
-        for address, balance_data in node_data['results'].items():
-            node_table.add_row(
-                address,
-                f"{balance_data['liquid']:,.2f}",
-                f"{balance_data['staked']:,.2f}",
-                f"{balance_data['total']:,.2f}",
-                "[green]✓[/green]"
-            )
-        
-        # Add failed results
-        for address, error in node_data['failed']:
-            node_table.add_row(
-                address,
-                "0.00",
-                "0.00",
-                "0.00",
-                "[red]✗[/red]"
-            )
-        
-        # Add total
-        node_table.add_section()
-        node_table.add_row(
-            "[bold]TOTAL[/bold]",
-            f"[bold green]{node_data['total_liquid']:,.2f}[/bold green]",
-            f"[bold blue]{node_data['total_staked']:,.2f}[/bold blue]",
-            f"[bold magenta]{total_node_stakes:,.2f}[/bold magenta]",
-            f"[dim]{len(node_data['results'])}/{len(node_stake_addresses)}[/dim]"
-        )
-        
-        console.print("\n")
-        console.print(node_table)
-        
-        if node_data['failed']:
-            console.print(f"\n[red]Failed node stake queries ({len(node_data['failed'])}):[/red]")
-            for address, error in node_data['failed']:
-                console.print(f"  [red]•[/red] {address}: {error}")
-    
-    # Grand total summary
-    grand_total = total_liquid_all + total_app_stakes + total_node_stakes
-    
-    console.print("\n" + "="*60)
-    console.print("[bold]TREASURY SUMMARY[/bold]")
-    console.print("="*60)
-    console.print(f"[green]Liquid Balances:[/green]     {total_liquid_all:>15,.2f} POKT")
-    console.print(f"[blue]App Stake Balances:[/blue]   {total_app_stakes:>15,.2f} POKT")
-    console.print(f"[blue]Node Stake Balances:[/blue]   {total_node_stakes:>15,.2f} POKT")
-    console.print("-" * 60)
-    console.print(f"[bold magenta]GRAND TOTAL:[/bold magenta]        {grand_total:>15,.2f} POKT")
-    console.print("="*60)
 
