@@ -51,6 +51,7 @@ def treasury_main(ctx: typer.Context):
     - app-stakes: Calculate app stake balances
     - liquid-balance: Calculate liquid balances
     - node-stakes: Calculate node stake balances
+    - validator-stakes: Calculate validator stake balances
     """
     if ctx.invoked_subcommand is None:
         console.print("[bold blue]Treasury Tools[/bold blue]")
@@ -60,6 +61,7 @@ def treasury_main(ctx: typer.Context):
         console.print("  [cyan]app-stakes[/cyan]       Calculate app stake balances")
         console.print("  [cyan]liquid-balance[/cyan]   Calculate liquid balances")
         console.print("  [cyan]node-stakes[/cyan]      Calculate node stake balances")
+        console.print("  [cyan]validator-stakes[/cyan] Calculate validator stake balances")
         
         console.print("\n[dim]Use 'pocketknife treasury-tools [SUBCOMMAND] --help' for more information.[/dim]")
         ctx.exit(0)
@@ -269,9 +271,9 @@ def treasury(
     max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
 ):
     """
-    Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.
+    Calculate all balances (liquid, app stake, node stake, validator stake) for treasury addresses from JSON file.
     Uses parallel processing for significantly faster execution.
-    Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...]}
+    Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...], "validator_stakes": [...]}
     
     Required options:
     --file: Path to JSON file with treasury addresses
@@ -282,7 +284,7 @@ def treasury(
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Treasury Command Help:[/bold]")
-        console.print("Calculate all balances (liquid, app stake, node stake) for treasury addresses from JSON file.\n")
+        console.print("Calculate all balances (liquid, app stake, node stake, validator stake) for treasury addresses from JSON file.\n")
         console.print("[bold]Required Options:[/bold]")
         console.print("  [cyan]--file[/cyan]        Path to JSON file with treasury addresses")
         console.print("\n[bold]Optional Options:[/bold]")
@@ -303,9 +305,10 @@ def treasury(
     liquid_addresses = treasury_data.get("liquid", [])
     app_stake_addresses = treasury_data.get("app_stakes", [])
     node_stake_addresses = treasury_data.get("node_stakes", [])
+    validator_stake_addresses = treasury_data.get("validator_stakes", [])
     
     # Display execution plan
-    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses)
+    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses) + len(validator_stake_addresses)
     console.print(f"[bold blue]Starting parallel treasury analysis...[/bold blue]")
     console.print(f"[dim]Total addresses: {total_addresses} | Max workers: {max_workers}[/dim]")
     
@@ -313,7 +316,7 @@ def treasury(
     futures = {}
     results = {}
     
-    with ThreadPoolExecutor(max_workers=3) as category_executor:  # One worker per category
+    with ThreadPoolExecutor(max_workers=4) as category_executor:  # One worker per category
         # Submit category-level tasks
         if liquid_addresses:
             console.print(f"[yellow]Querying {len(liquid_addresses)} liquid addresses...[/yellow]")
@@ -326,6 +329,10 @@ def treasury(
         if node_stake_addresses:
             console.print(f"[yellow]Querying {len(node_stake_addresses)} node stake addresses...[/yellow]")
             futures['node_stakes'] = category_executor.submit(query_node_stakes_parallel, node_stake_addresses, max_workers)
+        
+        if validator_stake_addresses:
+            console.print(f"[yellow]Querying {len(validator_stake_addresses)} validator stake addresses...[/yellow]")
+            futures['validator_stakes'] = category_executor.submit(query_validator_stakes_parallel, validator_stake_addresses, max_workers)
         
         # Collect results as they complete
         for category in futures:
@@ -480,8 +487,60 @@ def treasury(
             for address, error in node_data['failed']:
                 console.print(f"  [red]•[/red] {address}: {error}")
     
+    # Display results for validator stake addresses
+    total_validator_stakes = 0.0
+    if validator_stake_addresses and 'validator_stakes' in results:
+        validator_data = results['validator_stakes']
+        total_validator_stakes = validator_data['total_combined']
+        
+        # Create validator stakes table
+        validator_table = Table(title="Validator Stake Balance Report")
+        validator_table.add_column("Address", style="cyan", no_wrap=True)
+        validator_table.add_column("Liquid (POKT)", justify="right", style="green")
+        validator_table.add_column("Staked (POKT)", justify="right", style="blue")
+        validator_table.add_column("Total (POKT)", justify="right", style="magenta")
+        validator_table.add_column("Status", justify="center")
+        
+        # Add successful results
+        for address, balance_data in validator_data['results'].items():
+            validator_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['staked']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
+        
+        # Add failed results
+        for address, error in validator_data['failed']:
+            validator_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
+        
+        # Add total
+        validator_table.add_section()
+        validator_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{validator_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold blue]{validator_data['total_staked']:,.2f}[/bold blue]",
+            f"[bold magenta]{total_validator_stakes:,.2f}[/bold magenta]",
+            f"[dim]{len(validator_data['results'])}/{len(validator_stake_addresses)}[/dim]"
+        )
+        
+        console.print("\n")
+        console.print(validator_table)
+        
+        if validator_data['failed']:
+            console.print(f"\n[red]Failed validator stake queries ({len(validator_data['failed'])}):[/red]")
+            for address, error in validator_data['failed']:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    
     # Grand total summary
-    grand_total = total_liquid_all + total_app_stakes + total_node_stakes
+    grand_total = total_liquid_all + total_app_stakes + total_node_stakes + total_validator_stakes
     
     console.print("\n" + "="*60)
     console.print("[bold]TREASURY SUMMARY[/bold]")
@@ -489,6 +548,7 @@ def treasury(
     console.print(f"[green]Liquid Balances:[/green]     {total_liquid_all:>15,.2f} POKT")
     console.print(f"[blue]App Stake Balances:[/blue]   {total_app_stakes:>15,.2f} POKT")
     console.print(f"[blue]Node Stake Balances:[/blue]   {total_node_stakes:>15,.2f} POKT")
+    console.print(f"[blue]Validator Stake Balances:[/blue] {total_validator_stakes:>15,.2f} POKT")
     console.print("-" * 60)
     console.print(f"[bold magenta]GRAND TOTAL:[/bold magenta]        {grand_total:>15,.2f} POKT")
     console.print("="*60)
@@ -715,6 +775,101 @@ def get_liquid_balance(address: str) -> tuple[float, bool, str]:
         return 0.0, False, str(e)
 
 
+def get_validator_account_address(validator_operator_address: str) -> tuple[str, bool, str]:
+    """
+    Convert validator operator address to Bech32 account address.
+    Returns (account_address, success, error_message)
+    """
+    cmd = [
+        "pocketd", "debug", "addr", validator_operator_address
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return "", False, result.stderr.strip() or "Failed to convert address"
+        
+        # Parse the output to extract Bech32 Acc address
+        lines = result.stdout.split('\n')
+        for line in lines:
+            if line.strip().startswith('Bech32 Acc:'):
+                account_address = line.split('Bech32 Acc:')[1].strip()
+                return account_address, True, ""
+        
+        return "", False, "Could not find Bech32 Acc address in output"
+        
+    except subprocess.TimeoutExpired:
+        return "", False, "Address conversion timeout"
+    except Exception as e:
+        return "", False, f"Address conversion error: {str(e)}"
+
+
+def get_validator_stake_balance(address: str) -> tuple[float, float, bool, str]:
+    """
+    Get validator stake balance for a single address.
+    Returns (liquid_balance, staked_balance, success, error_message)
+    """
+    # First convert validator operator address to account address
+    account_address, addr_success, addr_error = get_validator_account_address(address)
+    
+    if not addr_success:
+        return 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
+    
+    # Get liquid balance using the account address
+    liquid_balance, liquid_success, liquid_error = get_liquid_balance(account_address)
+    
+    # Get validator stake balance using the original operator address
+    cmd = [
+        "pocketd", "query", "staking", "validator", address,
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--output", "json"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            if liquid_success:
+                return liquid_balance, 0.0, True, "No validator stake found"
+            else:
+                return 0.0, 0.0, False, liquid_error or "No validator stake found"
+        
+        data = json.loads(result.stdout)
+        validator = data.get("validator", {})
+        tokens = validator.get("tokens", "0")
+        
+        if not tokens or tokens == "0":
+            if liquid_success:
+                return liquid_balance, 0.0, True, "No validator stake found"
+            else:
+                return 0.0, 0.0, False, liquid_error or "No validator stake found"
+        
+        # Convert from upokt to pokt (divide by 1,000,000)
+        upokt_staked = int(tokens)
+        pokt_staked = upokt_staked / 1_000_000
+        
+        # Return success if either liquid or staked balance exists
+        success = liquid_success or (pokt_staked > 0)
+        error_msg = "" if success else (liquid_error or "No balances found")
+        
+        return liquid_balance, pokt_staked, success, error_msg
+        
+    except subprocess.TimeoutExpired:
+        if liquid_success:
+            return liquid_balance, 0.0, True, "Validator stake query timeout"
+        else:
+            return 0.0, 0.0, False, "Query timeout"
+    except json.JSONDecodeError:
+        if liquid_success:
+            return liquid_balance, 0.0, True, "Invalid validator stake JSON response"
+        else:
+            return 0.0, 0.0, False, "Invalid JSON response"
+    except Exception as e:
+        if liquid_success:
+            return liquid_balance, 0.0, True, f"Validator stake error: {str(e)}"
+        else:
+            return 0.0, 0.0, False, str(e)
+
+
 def query_liquid_balances_parallel(addresses: list[str], max_workers: int = 10) -> dict:
     """
     Query liquid balances for multiple addresses in parallel.
@@ -826,6 +981,49 @@ def query_node_stakes_parallel(addresses: list[str], max_workers: int = 10) -> d
     # Execute queries in parallel
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(query_single_node, addr) for addr in addresses]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle exceptions
+    
+    return {
+        'results': results,
+        'failed': failed,
+        'total_liquid': sum(r['liquid'] for r in results.values()),
+        'total_staked': sum(r['staked'] for r in results.values()),
+        'total_combined': sum(r['total'] for r in results.values())
+    }
+
+
+def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10) -> dict:
+    """
+    Query validator stake balances for multiple addresses in parallel.
+    Returns dict with results and metadata for progress tracking.
+    """
+    results = {}
+    failed = []
+    completed_count = 0
+    total_count = len(addresses)
+    lock = threading.Lock()
+    
+    def query_single_validator(address: str):
+        nonlocal completed_count
+        liquid_balance, staked_balance, success, error = get_validator_stake_balance(address)
+        
+        with lock:
+            completed_count += 1
+            console.print(f"[dim]Validator stake {completed_count}/{total_count}: {address}... done[/dim]")
+            
+            if success:
+                results[address] = {
+                    'liquid': liquid_balance,
+                    'staked': staked_balance,
+                    'total': liquid_balance + staked_balance
+                }
+            else:
+                failed.append((address, error))
+    
+    # Execute queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(query_single_validator, addr) for addr in addresses]
         for future in as_completed(futures):
             future.result()  # Wait for completion and handle exceptions
     
@@ -1123,6 +1321,105 @@ def node_stakes(
             console.print(f"  [red]•[/red] {address}: {error}")
 
 
+@treasury_app.command()
+def validator_stakes(
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+):
+    """
+    Calculate validator stake balances (liquid + staked) for addresses listed in a file.
+    
+    Required options:
+    --file: Path to file with addresses, one per line
+    """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Validator Stakes Command Help:[/bold]")
+        console.print("Calculate validator stake balances (liquid + staked) for addresses listed in a file.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to file with addresses, one per line")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife treasury-tools validator-stakes --file addresses.txt")
+        console.print("\n[dim]Use 'pocketknife treasury-tools validator-stakes --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
+    if not addresses_file.exists():
+        console.print(f"[red]File not found:[/red] {addresses_file}")
+        raise typer.Exit(1)
+
+    with addresses_file.open() as f:
+        addresses = [line.strip() for line in f if line.strip()]
+
+    if not addresses:
+        console.print("[red]No addresses found in the file. Exiting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Querying validator stake balances for {len(addresses)} addresses...[/yellow]")
+    
+    # Create table for results
+    table = Table(title="Validator Stake Balance Report")
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Liquid (POKT)", justify="right", style="green")
+    table.add_column("Staked (POKT)", justify="right", style="blue")
+    table.add_column("Total (POKT)", justify="right", style="magenta")
+    table.add_column("Status", justify="center")
+    
+    successful_queries = []
+    failed_addresses = []
+    total_liquid = 0.0
+    total_staked = 0.0
+    
+    for i, address in enumerate(addresses, 1):
+        console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
+        
+        liquid_balance, staked_balance, success, error = get_validator_stake_balance(address)
+        total_balance = liquid_balance + staked_balance
+        
+        if success:
+            successful_queries.append((address, liquid_balance, staked_balance, total_balance))
+            total_liquid += liquid_balance
+            total_staked += staked_balance
+            table.add_row(
+                address,
+                f"{liquid_balance:,.2f}",
+                f"{staked_balance:,.2f}",
+                f"{total_balance:,.2f}",
+                "[green]✓[/green]"
+            )
+        else:
+            failed_addresses.append((address, error))
+            table.add_row(
+                address,
+                "0.00",
+                "0.00", 
+                "0.00",
+                "[red]✗[/red]"
+            )
+    
+    # Add separator row and totals
+    table.add_section()
+    grand_total = total_liquid + total_staked
+    table.add_row(
+        "[bold]TOTAL[/bold]",
+        f"[bold green]{total_liquid:,.2f}[/bold green]",
+        f"[bold blue]{total_staked:,.2f}[/bold blue]",
+        f"[bold magenta]{grand_total:,.2f}[/bold magenta]",
+        f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
+    )
+    
+    # Display results table
+    console.print("\n")
+    console.print(table)
+    
+    console.print(f"[dim]Successfully queried: {len(successful_queries)}/{len(addresses)} addresses[/dim]")
+    
+    # Show failed addresses if any
+    if failed_addresses:
+        console.print(f"\n[red]Failed to query {len(failed_addresses)} addresses:[/red]")
+        for address, error in failed_addresses:
+            console.print(f"  [red]•[/red] {address}: {error}")
+
+
 def validate_and_deduplicate_addresses(data: dict) -> dict:
     """
     Validate and deduplicate addresses in treasury data.
@@ -1131,9 +1428,10 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
     liquid = data.get("liquid", [])
     app_stakes = data.get("app_stakes", [])
     node_stakes = data.get("node_stakes", [])
+    validator_stakes = data.get("validator_stakes", [])
     
     # Check for duplicates within each array
-    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes)]:
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes)]:
         if len(addresses) != len(set(addresses)):
             duplicates = [addr for addr in addresses if addresses.count(addr) > 1]
             unique_duplicates = list(set(duplicates))
@@ -1147,7 +1445,7 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
     all_addresses = set()
     conflicts = {}
     
-    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes)]:
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes)]:
         for addr in addresses:
             if addr in all_addresses:
                 if addr not in conflicts:
@@ -1166,7 +1464,7 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
             console.print(f"  [red]•[/red] {addr} appears in: {', '.join(arrays)}")
         
         console.print("\n[yellow]Recommendation: Remove these addresses from the 'liquid' array since[/yellow]")
-        console.print("[yellow]app_stakes and node_stakes already calculate liquid balances.[/yellow]")
+        console.print("[yellow]app_stakes, node_stakes, and validator_stakes already calculate liquid balances.[/yellow]")
         console.print("\n[yellow]Please fix the duplicate addresses and try again.[/yellow]")
         raise typer.Exit(1)
     
@@ -1176,7 +1474,7 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
 def load_treasury_addresses(file_path: Path) -> dict:
     """
     Load treasury addresses from JSON file.
-    Expected format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...]}
+    Expected format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...], "validator_stakes": [...]}
     """
     try:
         with file_path.open() as f:
@@ -1186,7 +1484,7 @@ def load_treasury_addresses(file_path: Path) -> dict:
         if not isinstance(data, dict):
             raise ValueError("JSON file must contain an object")
         
-        for key in ["liquid", "app_stakes", "node_stakes"]:
+        for key in ["liquid", "app_stakes", "node_stakes", "validator_stakes"]:
             if key not in data:
                 data[key] = []
             elif not isinstance(data[key], list):
