@@ -17,7 +17,7 @@
 |---------|-------------|--------------|
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
-| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake types<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
+| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake types<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
 
 ## Installation
@@ -183,6 +183,21 @@ Successfully saved 670 operator addresses!
    pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
    ```
 
+#### Validator Stake Balance Calculation
+
+1. **Create validator stake address list**
+   ```txt
+   poktvaloper1ugqztuk8x5fa356adpv6r9y7r9mdq0p47h2vpq
+   poktvaloper1another5validator6address
+   ```
+
+2. **Query validator stake balances**
+   ```bash
+   pocketknife treasury-tools validator-stakes --file /path/to/validator_addresses.txt
+   ```
+
+   > **Note:** Use validator operator addresses (`poktvaloper1...`), not consensus addresses (`poktvalcons1...`)
+
 </details>
 
 #### Complete Treasury Analysis
@@ -202,6 +217,9 @@ Successfully saved 670 operator addresses!
      ],
      "node_stakes": [
        "pokt1node5stake6address7here"
+     ],
+     "validator_stakes": [
+       "poktvaloper1ugqztuk8x5fa356adpv6r9y7r9mdq0p47h2vpq"
      ]
    }
    ```
@@ -217,6 +235,7 @@ Successfully saved 670 operator addresses!
    - Liquid balances (if provided)
    - App stake balances with liquid + staked columns
    - Node stake balances with liquid + staked columns
+   - Validator stake balances with liquid + staked columns
    - **Grand total summary** across all categories
    - **Duplicate detection** prevents double-counting
 
