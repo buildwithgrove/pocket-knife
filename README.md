@@ -197,6 +197,10 @@ Successfully saved 670 operator addresses!
    ```
 
    > **Note:** Use validator operator addresses (`poktvaloper1...`), not consensus addresses (`poktvalcons1...`)
+   
+   **Technical Details:** The validator stakes query performs a two-step process:
+   1. Converts validator operator address to account address using `pocketd debug addr`
+   2. Queries liquid balance using account address and staked balance using operator address
 
 </details>
 
