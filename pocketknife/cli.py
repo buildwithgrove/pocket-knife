@@ -775,15 +775,50 @@ def get_liquid_balance(address: str) -> tuple[float, bool, str]:
         return 0.0, False, str(e)
 
 
+def get_validator_account_address(validator_operator_address: str) -> tuple[str, bool, str]:
+    """
+    Convert validator operator address to Bech32 account address.
+    Returns (account_address, success, error_message)
+    """
+    cmd = [
+        "pocketd", "debug", "addr", validator_operator_address
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return "", False, result.stderr.strip() or "Failed to convert address"
+        
+        # Parse the output to extract Bech32 Acc address
+        lines = result.stdout.split('\n')
+        for line in lines:
+            if line.strip().startswith('Bech32 Acc:'):
+                account_address = line.split('Bech32 Acc:')[1].strip()
+                return account_address, True, ""
+        
+        return "", False, "Could not find Bech32 Acc address in output"
+        
+    except subprocess.TimeoutExpired:
+        return "", False, "Address conversion timeout"
+    except Exception as e:
+        return "", False, f"Address conversion error: {str(e)}"
+
+
 def get_validator_stake_balance(address: str) -> tuple[float, float, bool, str]:
     """
     Get validator stake balance for a single address.
     Returns (liquid_balance, staked_balance, success, error_message)
     """
-    # Get liquid balance first
-    liquid_balance, liquid_success, liquid_error = get_liquid_balance(address)
+    # First convert validator operator address to account address
+    account_address, addr_success, addr_error = get_validator_account_address(address)
     
-    # Get validator stake balance
+    if not addr_success:
+        return 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
+    
+    # Get liquid balance using the account address
+    liquid_balance, liquid_success, liquid_error = get_liquid_balance(account_address)
+    
+    # Get validator stake balance using the original operator address
     cmd = [
         "pocketd", "query", "staking", "validator", address,
         "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
