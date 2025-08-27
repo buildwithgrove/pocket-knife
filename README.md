@@ -17,7 +17,7 @@
 |---------|-------------|--------------|
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
-| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake types<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
+| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake types<br>• Includes delegator and validator rewards for validators<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
 
 ## Installation
@@ -151,6 +151,8 @@ Successfully saved 670 operator addresses!
 
 ### Treasury Balance Operations
 
+> **New Feature:** Validator stakes now include delegator and validator rewards for complete balance analysis!
+
 <details>
 <summary>Individual Balance Calculations (Click to expand)</summary>
 
@@ -198,9 +200,24 @@ Successfully saved 670 operator addresses!
 
    > **Note:** Use validator operator addresses (`poktvaloper1...`), not consensus addresses (`poktvalcons1...`)
    
-   **Technical Details:** The validator stakes query performs a two-step process:
+   **Technical Details:** The validator stakes query performs a comprehensive analysis:
    1. Converts validator operator address to account address using `pocketd debug addr`
-   2. Queries liquid balance using account address and staked balance using operator address
+   2. Queries liquid balance using account address
+   3. Queries delegator rewards using account address (`pocketd query distribution rewards`)
+   4. Queries validator outstanding rewards using operator address (`pocketd query distribution validator-outstanding-rewards`)
+   5. Queries staked balance using operator address (`pocketd query staking validator`)
+   
+   **Reward Calculations:**
+   - **Delegator Rewards:** Sums all `upokt` rewards from distribution rewards query
+   - **Validator Outstanding Rewards:** Sums all `upokt` rewards from validator outstanding rewards query
+   - **Conversion:** All amounts converted from `upokt` to `POKT` (divided by 1,000,000)
+   
+   **Output includes:**
+   - Liquid balance (POKT)
+   - Staked balance (POKT) 
+   - Delegator rewards (POKT)
+   - Validator outstanding rewards (POKT)
+   - Total combined balance (POKT)
 
 </details>
 
@@ -239,7 +256,7 @@ Successfully saved 670 operator addresses!
    - Liquid balances (if provided)
    - App stake balances with liquid + staked columns
    - Node stake balances with liquid + staked columns
-   - Validator stake balances with liquid + staked columns
+   - Validator stake balances with liquid + staked + delegator rewards + validator rewards columns
    - **Grand total summary** across all categories
    - **Duplicate detection** prevents double-counting
 

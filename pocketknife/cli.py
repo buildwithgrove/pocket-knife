@@ -498,7 +498,9 @@ def treasury(
         validator_table.add_column("Address", style="cyan", no_wrap=True)
         validator_table.add_column("Liquid (POKT)", justify="right", style="green")
         validator_table.add_column("Staked (POKT)", justify="right", style="blue")
-        validator_table.add_column("Total (POKT)", justify="right", style="magenta")
+        validator_table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
+        validator_table.add_column("Validator Rewards (POKT)", justify="right", style="magenta")
+        validator_table.add_column("Total (POKT)", justify="right", style="bold white")
         validator_table.add_column("Status", justify="center")
         
         # Add successful results
@@ -507,6 +509,8 @@ def treasury(
                 address,
                 f"{balance_data['liquid']:,.2f}",
                 f"{balance_data['staked']:,.2f}",
+                f"{balance_data['delegator_rewards']:,.2f}",
+                f"{balance_data['validator_rewards']:,.2f}",
                 f"{balance_data['total']:,.2f}",
                 "[green]✓[/green]"
             )
@@ -515,6 +519,8 @@ def treasury(
         for address, error in validator_data['failed']:
             validator_table.add_row(
                 address,
+                "0.00",
+                "0.00",
                 "0.00",
                 "0.00",
                 "0.00",
@@ -527,7 +533,9 @@ def treasury(
             "[bold]TOTAL[/bold]",
             f"[bold green]{validator_data['total_liquid']:,.2f}[/bold green]",
             f"[bold blue]{validator_data['total_staked']:,.2f}[/bold blue]",
-            f"[bold magenta]{total_validator_stakes:,.2f}[/bold magenta]",
+            f"[bold yellow]{validator_data['total_delegator_rewards']:,.2f}[/bold yellow]",
+            f"[bold magenta]{validator_data['total_validator_rewards']:,.2f}[/bold magenta]",
+            f"[bold white]{total_validator_stakes:,.2f}[/bold white]",
             f"[dim]{len(validator_data['results'])}/{len(validator_stake_addresses)}[/dim]"
         )
         
@@ -804,19 +812,125 @@ def get_validator_account_address(validator_operator_address: str) -> tuple[str,
         return "", False, f"Address conversion error: {str(e)}"
 
 
-def get_validator_stake_balance(address: str) -> tuple[float, float, bool, str]:
+def get_delegator_rewards(account_address: str) -> tuple[float, bool, str]:
     """
-    Get validator stake balance for a single address.
-    Returns (liquid_balance, staked_balance, success, error_message)
+    Get delegator rewards for an account address.
+    Returns (rewards_balance, success, error_message)
+    """
+    cmd = [
+        "pocketd", "query", "distribution", "rewards", account_address,
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--output", "json"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return 0.0, True, ""  # No rewards is still a successful query
+        
+        data = json.loads(result.stdout)
+        rewards = data.get("rewards", [])
+        
+        if not rewards:
+            return 0.0, True, ""  # No rewards is still a successful query
+        
+        # Sum up all upokt rewards
+        total_upokt = 0.0
+        for reward_entry in rewards:
+            reward_list = reward_entry.get("reward", [])
+            for reward in reward_list:
+                if reward.get("denom") == "upokt":
+                    amount_str = reward.get("amount", "0")
+                    # Handle decimal amounts like "3730392481.420254000000000000"
+                    try:
+                        amount = float(amount_str)
+                        total_upokt += amount
+                    except ValueError:
+                        continue
+        
+        # Convert from upokt to pokt (divide by 1,000,000)
+        pokt_rewards = total_upokt / 1_000_000
+        return pokt_rewards, True, ""
+        
+    except subprocess.TimeoutExpired:
+        return 0.0, False, "Delegator rewards query timeout"
+    except json.JSONDecodeError:
+        return 0.0, False, "Invalid delegator rewards JSON response"
+    except Exception as e:
+        return 0.0, False, f"Delegator rewards error: {str(e)}"
+
+
+def get_validator_outstanding_rewards(validator_operator_address: str) -> tuple[float, bool, str]:
+    """
+    Get validator outstanding rewards for a validator operator address.
+    Returns (rewards_balance, success, error_message)
+    """
+    cmd = [
+        "pocketd", "query", "distribution", "validator-outstanding-rewards", validator_operator_address,
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--output", "json"
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return 0.0, True, ""  # No rewards is still a successful query
+        
+        data = json.loads(result.stdout)
+        rewards = data.get("rewards", {})
+        
+        if not rewards:
+            return 0.0, True, ""  # No rewards is still a successful query
+        
+        # Get the rewards list
+        rewards_list = rewards.get("rewards", [])
+        
+        if not rewards_list:
+            return 0.0, True, ""
+        
+        # Sum up all upokt rewards
+        total_upokt = 0.0
+        for reward in rewards_list:
+            if reward.endswith("upokt"):
+                # Handle decimal amounts like "4202756595.434928297608388076upokt"
+                amount_str = reward.replace("upokt", "")
+                try:
+                    amount = float(amount_str)
+                    total_upokt += amount
+                except ValueError:
+                    continue
+        
+        # Convert from upokt to pokt (divide by 1,000,000)
+        pokt_rewards = total_upokt / 1_000_000
+        return pokt_rewards, True, ""
+        
+    except subprocess.TimeoutExpired:
+        return 0.0, False, "Validator outstanding rewards query timeout"
+    except json.JSONDecodeError:
+        return 0.0, False, "Invalid validator outstanding rewards JSON response"
+    except Exception as e:
+        return 0.0, False, f"Validator outstanding rewards error: {str(e)}"
+
+
+def get_validator_stake_balance(address: str) -> tuple[float, float, float, float, bool, str]:
+    """
+    Get validator stake balance and rewards for a single address.
+    Returns (liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error_message)
     """
     # First convert validator operator address to account address
     account_address, addr_success, addr_error = get_validator_account_address(address)
     
     if not addr_success:
-        return 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
+        return 0.0, 0.0, 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
     
     # Get liquid balance using the account address
     liquid_balance, liquid_success, liquid_error = get_liquid_balance(account_address)
+    
+    # Get delegator rewards using the account address
+    delegator_rewards, delegator_success, delegator_error = get_delegator_rewards(account_address)
+    
+    # Get validator outstanding rewards using the original validator operator address
+    validator_rewards, validator_success, validator_error = get_validator_outstanding_rewards(address)
     
     # Get validator stake balance using the original operator address
     cmd = [
@@ -828,46 +942,38 @@ def get_validator_stake_balance(address: str) -> tuple[float, float, bool, str]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
-            if liquid_success:
-                return liquid_balance, 0.0, True, "No validator stake found"
-            else:
-                return 0.0, 0.0, False, liquid_error or "No validator stake found"
+            # Return what we have even if staking query fails
+            success = liquid_success or delegator_success or validator_success
+            return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "No validator stake found"
         
         data = json.loads(result.stdout)
         validator = data.get("validator", {})
         tokens = validator.get("tokens", "0")
         
         if not tokens or tokens == "0":
-            if liquid_success:
-                return liquid_balance, 0.0, True, "No validator stake found"
-            else:
-                return 0.0, 0.0, False, liquid_error or "No validator stake found"
+            # Return what we have even if no stake
+            success = liquid_success or delegator_success or validator_success
+            return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "No validator stake found"
         
         # Convert from upokt to pokt (divide by 1,000,000)
         upokt_staked = int(tokens)
         pokt_staked = upokt_staked / 1_000_000
         
-        # Return success if either liquid or staked balance exists
-        success = liquid_success or (pokt_staked > 0)
-        error_msg = "" if success else (liquid_error or "No balances found")
+        # Return success if any balance exists
+        success = liquid_success or (pokt_staked > 0) or delegator_success or validator_success
+        error_msg = "" if success else "No balances found"
         
-        return liquid_balance, pokt_staked, success, error_msg
+        return liquid_balance, pokt_staked, delegator_rewards, validator_rewards, success, error_msg
         
     except subprocess.TimeoutExpired:
-        if liquid_success:
-            return liquid_balance, 0.0, True, "Validator stake query timeout"
-        else:
-            return 0.0, 0.0, False, "Query timeout"
+        success = liquid_success or delegator_success or validator_success
+        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "Validator stake query timeout"
     except json.JSONDecodeError:
-        if liquid_success:
-            return liquid_balance, 0.0, True, "Invalid validator stake JSON response"
-        else:
-            return 0.0, 0.0, False, "Invalid JSON response"
+        success = liquid_success or delegator_success or validator_success
+        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "Invalid validator stake JSON response"
     except Exception as e:
-        if liquid_success:
-            return liquid_balance, 0.0, True, f"Validator stake error: {str(e)}"
-        else:
-            return 0.0, 0.0, False, str(e)
+        success = liquid_success or delegator_success or validator_success
+        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, f"Validator stake error: {str(e)}"
 
 
 def query_liquid_balances_parallel(addresses: list[str], max_workers: int = 10) -> dict:
@@ -1006,7 +1112,7 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
     
     def query_single_validator(address: str):
         nonlocal completed_count
-        liquid_balance, staked_balance, success, error = get_validator_stake_balance(address)
+        liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error = get_validator_stake_balance(address)
         
         with lock:
             completed_count += 1
@@ -1016,7 +1122,9 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
                 results[address] = {
                     'liquid': liquid_balance,
                     'staked': staked_balance,
-                    'total': liquid_balance + staked_balance
+                    'delegator_rewards': delegator_rewards,
+                    'validator_rewards': validator_rewards,
+                    'total': liquid_balance + staked_balance + delegator_rewards + validator_rewards
                 }
             else:
                 failed.append((address, error))
@@ -1032,6 +1140,8 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
         'failed': failed,
         'total_liquid': sum(r['liquid'] for r in results.values()),
         'total_staked': sum(r['staked'] for r in results.values()),
+        'total_delegator_rewards': sum(r['delegator_rewards'] for r in results.values()),
+        'total_validator_rewards': sum(r['validator_rewards'] for r in results.values()),
         'total_combined': sum(r['total'] for r in results.values())
     }
 
@@ -1327,7 +1437,7 @@ def validator_stakes(
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
 ):
     """
-    Calculate validator stake balances (liquid + staked) for addresses listed in a file.
+    Calculate validator stake balances (liquid + staked + delegator rewards + validator rewards) for addresses listed in a file.
     
     Required options:
     --file: Path to file with addresses, one per line
@@ -1335,7 +1445,7 @@ def validator_stakes(
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Validator Stakes Command Help:[/bold]")
-        console.print("Calculate validator stake balances (liquid + staked) for addresses listed in a file.\n")
+        console.print("Calculate validator stake balances (liquid + staked + delegator rewards + validator rewards) for addresses listed in a file.\n")
         console.print("[bold]Required Options:[/bold]")
         console.print("  [cyan]--file[/cyan]  Path to file with addresses, one per line")
         console.print("\n[bold]Example:[/bold]")
@@ -1361,28 +1471,36 @@ def validator_stakes(
     table.add_column("Address", style="cyan", no_wrap=True)
     table.add_column("Liquid (POKT)", justify="right", style="green")
     table.add_column("Staked (POKT)", justify="right", style="blue")
-    table.add_column("Total (POKT)", justify="right", style="magenta")
+    table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
+    table.add_column("Validator Rewards (POKT)", justify="right", style="magenta")
+    table.add_column("Total (POKT)", justify="right", style="bold white")
     table.add_column("Status", justify="center")
     
     successful_queries = []
     failed_addresses = []
     total_liquid = 0.0
     total_staked = 0.0
+    total_delegator_rewards = 0.0
+    total_validator_rewards = 0.0
     
     for i, address in enumerate(addresses, 1):
         console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
         
-        liquid_balance, staked_balance, success, error = get_validator_stake_balance(address)
-        total_balance = liquid_balance + staked_balance
+        liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error = get_validator_stake_balance(address)
+        total_balance = liquid_balance + staked_balance + delegator_rewards + validator_rewards
         
         if success:
-            successful_queries.append((address, liquid_balance, staked_balance, total_balance))
+            successful_queries.append((address, liquid_balance, staked_balance, delegator_rewards, validator_rewards, total_balance))
             total_liquid += liquid_balance
             total_staked += staked_balance
+            total_delegator_rewards += delegator_rewards
+            total_validator_rewards += validator_rewards
             table.add_row(
                 address,
                 f"{liquid_balance:,.2f}",
                 f"{staked_balance:,.2f}",
+                f"{delegator_rewards:,.2f}",
+                f"{validator_rewards:,.2f}",
                 f"{total_balance:,.2f}",
                 "[green]✓[/green]"
             )
@@ -1393,17 +1511,21 @@ def validator_stakes(
                 "0.00",
                 "0.00", 
                 "0.00",
+                "0.00",
+                "0.00",
                 "[red]✗[/red]"
             )
     
     # Add separator row and totals
     table.add_section()
-    grand_total = total_liquid + total_staked
+    grand_total = total_liquid + total_staked + total_delegator_rewards + total_validator_rewards
     table.add_row(
         "[bold]TOTAL[/bold]",
         f"[bold green]{total_liquid:,.2f}[/bold green]",
         f"[bold blue]{total_staked:,.2f}[/bold blue]",
-        f"[bold magenta]{grand_total:,.2f}[/bold magenta]",
+        f"[bold yellow]{total_delegator_rewards:,.2f}[/bold yellow]",
+        f"[bold magenta]{total_validator_rewards:,.2f}[/bold magenta]",
+        f"[bold white]{grand_total:,.2f}[/bold white]",
         f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
     )
     
