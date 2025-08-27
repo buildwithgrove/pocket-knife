@@ -839,9 +839,9 @@ def get_delegator_rewards(account_address: str) -> tuple[float, bool, str]:
         for reward_entry in rewards:
             reward_list = reward_entry.get("reward", [])
             for reward in reward_list:
-                if reward.get("denom") == "upokt":
-                    amount_str = reward.get("amount", "0")
-                    # Handle decimal amounts like "3730392481.420254000000000000"
+                if isinstance(reward, str) and reward.endswith("upokt"):
+                    # Handle decimal amounts like "300491.883966650000000000upokt"
+                    amount_str = reward.replace("upokt", "")
                     try:
                         amount = float(amount_str)
                         total_upokt += amount
