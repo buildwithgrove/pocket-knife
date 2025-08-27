@@ -191,9 +191,12 @@ stake_application() {
 delegate_to_gateway() {
     local from_addr="$1"
     local gateway_addr="$2"
+    local skip_wait="${3:-false}"
     
     if [[ "$dry_run" == true ]]; then
-        print_color $YELLOW "🔍 [DRY RUN] Would wait 60 seconds before delegation..."
+        if [[ "$skip_wait" != true ]]; then
+            print_color $YELLOW "🔍 [DRY RUN] Would wait 60 seconds before delegation..."
+        fi
         print_color $YELLOW "🔍 [DRY RUN] Would delegate $from_addr to gateway $gateway_addr"
         
         # Build command flags
@@ -208,8 +211,10 @@ delegate_to_gateway() {
         return 0
     fi
     
-    print_color $BLUE "⏳ Waiting 60 seconds before delegation..."
-    sleep 60
+    if [[ "$skip_wait" != true ]]; then
+        print_color $BLUE "⏳ Waiting 60 seconds before delegation..."
+        sleep 60
+    fi
     
     print_color $BLUE "🔗 Delegating $from_addr to gateway $gateway_addr..."
     
@@ -306,7 +311,7 @@ process_batch_file() {
         echo
         
         for address in "${staked_addresses[@]}"; do
-            if delegate_to_gateway "$address" "$delegate_addr"; then
+            if delegate_to_gateway "$address" "$delegate_addr" true; then
                 successful_delegations=$((successful_delegations + 1))
             else
                 failed_delegations=$((failed_delegations + 1))
