@@ -49,6 +49,7 @@ def treasury_main(ctx: typer.Context):
     
     Available subcommands:
     - app-stakes: Calculate app stake balances
+    - delegator-stakes: Calculate delegator stake balances
     - liquid-balance: Calculate liquid balances
     - node-stakes: Calculate node stake balances
     - validator-stakes: Calculate validator stake balances
@@ -59,9 +60,12 @@ def treasury_main(ctx: typer.Context):
         
         console.print("[bold]Available Subcommands:[/bold]")
         console.print("  [cyan]app-stakes[/cyan]       Calculate app stake balances")
+        console.print("  [cyan]delegator-stakes[/cyan] Calculate delegator stake balances")
         console.print("  [cyan]liquid-balance[/cyan]   Calculate liquid balances")
         console.print("  [cyan]node-stakes[/cyan]      Calculate node stake balances")
         console.print("  [cyan]validator-stakes[/cyan] Calculate validator stake balances")
+        console.print("\n[dim]All subcommands support both text files (one address per line)")
+        console.print("and JSON files (extracts from appropriate array section).[/dim]")
         
         console.print("\n[dim]Use 'pocketknife treasury-tools [SUBCOMMAND] --help' for more information.[/dim]")
         ctx.exit(0)
@@ -306,9 +310,10 @@ def treasury(
     app_stake_addresses = treasury_data.get("app_stakes", [])
     node_stake_addresses = treasury_data.get("node_stakes", [])
     validator_stake_addresses = treasury_data.get("validator_stakes", [])
+    delegator_stake_addresses = treasury_data.get("delegator_stakes", [])
     
     # Display execution plan
-    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses) + len(validator_stake_addresses)
+    total_addresses = len(liquid_addresses) + len(app_stake_addresses) + len(node_stake_addresses) + len(validator_stake_addresses) + len(delegator_stake_addresses)
     console.print(f"[bold blue]Starting parallel treasury analysis...[/bold blue]")
     console.print(f"[dim]Total addresses: {total_addresses} | Max workers: {max_workers}[/dim]")
     
@@ -333,6 +338,10 @@ def treasury(
         if validator_stake_addresses:
             console.print(f"[yellow]Querying {len(validator_stake_addresses)} validator stake addresses...[/yellow]")
             futures['validator_stakes'] = category_executor.submit(query_validator_stakes_parallel, validator_stake_addresses, max_workers)
+        
+        if delegator_stake_addresses:
+            console.print(f"[yellow]Querying {len(delegator_stake_addresses)} delegator stake addresses...[/yellow]")
+            futures['delegator_stakes'] = category_executor.submit(query_delegator_stakes_parallel, delegator_stake_addresses, max_workers)
         
         # Collect results as they complete
         for category in futures:
@@ -498,7 +507,6 @@ def treasury(
         validator_table.add_column("Address", style="cyan", no_wrap=True)
         validator_table.add_column("Liquid (POKT)", justify="right", style="green")
         validator_table.add_column("Staked (POKT)", justify="right", style="blue")
-        validator_table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
         validator_table.add_column("Validator Rewards (POKT)", justify="right", style="magenta")
         validator_table.add_column("Total (POKT)", justify="right", style="bold white")
         validator_table.add_column("Status", justify="center")
@@ -509,7 +517,6 @@ def treasury(
                 address,
                 f"{balance_data['liquid']:,.2f}",
                 f"{balance_data['staked']:,.2f}",
-                f"{balance_data['delegator_rewards']:,.2f}",
                 f"{balance_data['validator_rewards']:,.2f}",
                 f"{balance_data['total']:,.2f}",
                 "[green]✓[/green]"
@@ -523,7 +530,6 @@ def treasury(
                 "0.00",
                 "0.00",
                 "0.00",
-                "0.00",
                 "[red]✗[/red]"
             )
         
@@ -533,7 +539,6 @@ def treasury(
             "[bold]TOTAL[/bold]",
             f"[bold green]{validator_data['total_liquid']:,.2f}[/bold green]",
             f"[bold blue]{validator_data['total_staked']:,.2f}[/bold blue]",
-            f"[bold yellow]{validator_data['total_delegator_rewards']:,.2f}[/bold yellow]",
             f"[bold magenta]{validator_data['total_validator_rewards']:,.2f}[/bold magenta]",
             f"[bold white]{total_validator_stakes:,.2f}[/bold white]",
             f"[dim]{len(validator_data['results'])}/{len(validator_stake_addresses)}[/dim]"
@@ -547,16 +552,69 @@ def treasury(
             for address, error in validator_data['failed']:
                 console.print(f"  [red]•[/red] {address}: {error}")
     
+    # Display results for delegator stake addresses
+    total_delegator_stakes = 0.0
+    if delegator_stake_addresses and 'delegator_stakes' in results:
+        delegator_data = results['delegator_stakes']
+        total_delegator_stakes = delegator_data['total_combined']
+        
+        # Create delegator stakes table
+        delegator_table = Table(title="Delegator Stake Balance Report")
+        delegator_table.add_column("Address", style="cyan", no_wrap=True)
+        delegator_table.add_column("Liquid (POKT)", justify="right", style="green")
+        delegator_table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
+        delegator_table.add_column("Total (POKT)", justify="right", style="bold white")
+        delegator_table.add_column("Status", justify="center")
+        
+        # Add successful results
+        for address, balance_data in delegator_data['results'].items():
+            delegator_table.add_row(
+                address,
+                f"{balance_data['liquid']:,.2f}",
+                f"{balance_data['delegator_rewards']:,.2f}",
+                f"{balance_data['total']:,.2f}",
+                "[green]✓[/green]"
+            )
+        
+        # Add failed results
+        for address, error in delegator_data['failed']:
+            delegator_table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
+        
+        # Add total
+        delegator_table.add_section()
+        delegator_table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold green]{delegator_data['total_liquid']:,.2f}[/bold green]",
+            f"[bold yellow]{delegator_data['total_delegator_rewards']:,.2f}[/bold yellow]",
+            f"[bold white]{total_delegator_stakes:,.2f}[/bold white]",
+            f"[dim]{len(delegator_data['results'])}/{len(delegator_stake_addresses)}[/dim]"
+        )
+        
+        console.print("\n")
+        console.print(delegator_table)
+        
+        if delegator_data['failed']:
+            console.print(f"\n[red]Failed delegator stake queries ({len(delegator_data['failed'])}):[/red]")
+            for address, error in delegator_data['failed']:
+                console.print(f"  [red]•[/red] {address}: {error}")
+    
     # Grand total summary
-    grand_total = total_liquid_all + total_app_stakes + total_node_stakes + total_validator_stakes
+    grand_total = total_liquid_all + total_app_stakes + total_node_stakes + total_validator_stakes + total_delegator_stakes
     
     console.print("\n" + "="*60)
     console.print("[bold]TREASURY SUMMARY[/bold]")
     console.print("="*60)
-    console.print(f"[green]Liquid Balances:[/green]     {total_liquid_all:>15,.2f} POKT")
-    console.print(f"[blue]App Stake Balances:[/blue]   {total_app_stakes:>15,.2f} POKT")
-    console.print(f"[blue]Node Stake Balances:[/blue]   {total_node_stakes:>15,.2f} POKT")
+    console.print(f"[green]Liquid Balances:[/green]       {total_liquid_all:>15,.2f} POKT")
+    console.print(f"[blue]App Stake Balances:[/blue]     {total_app_stakes:>15,.2f} POKT")
+    console.print(f"[blue]Node Stake Balances:[/blue]    {total_node_stakes:>15,.2f} POKT")
     console.print(f"[blue]Validator Stake Balances:[/blue] {total_validator_stakes:>15,.2f} POKT")
+    console.print(f"[yellow]Delegator Stake Balances:[/yellow] {total_delegator_stakes:>15,.2f} POKT")
     console.print("-" * 60)
     console.print(f"[bold magenta]GRAND TOTAL:[/bold magenta]        {grand_total:>15,.2f} POKT")
     console.print("="*60)
@@ -860,6 +918,26 @@ def get_delegator_rewards(account_address: str) -> tuple[float, bool, str]:
         return 0.0, False, f"Delegator rewards error: {str(e)}"
 
 
+def get_delegator_stake_balance(address: str) -> tuple[float, float, bool, str]:
+    """
+    Get delegator stake balance for a single address (liquid + delegator rewards).
+    Returns (liquid_balance, delegator_rewards, success, error_message)
+    """
+    # Get liquid balance
+    liquid_balance, liquid_success, liquid_error = get_liquid_balance(address)
+    
+    # Get delegator rewards
+    delegator_rewards, delegator_success, delegator_error = get_delegator_rewards(address)
+    
+    # Return success if either liquid or delegator rewards exist
+    success = liquid_success or delegator_success
+    error_msg = ""
+    if not success:
+        error_msg = f"Liquid: {liquid_error or 'Unknown error'}; Delegator: {delegator_error or 'Unknown error'}"
+    
+    return liquid_balance, delegator_rewards, success, error_msg
+
+
 def get_validator_outstanding_rewards(validator_operator_address: str) -> tuple[float, bool, str]:
     """
     Get validator outstanding rewards for a validator operator address.
@@ -912,22 +990,19 @@ def get_validator_outstanding_rewards(validator_operator_address: str) -> tuple[
         return 0.0, False, f"Validator outstanding rewards error: {str(e)}"
 
 
-def get_validator_stake_balance(address: str) -> tuple[float, float, float, float, bool, str]:
+def get_validator_stake_balance(address: str) -> tuple[float, float, float, bool, str]:
     """
-    Get validator stake balance and rewards for a single address.
-    Returns (liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error_message)
+    Get validator stake balance and rewards for a single address (excluding delegator rewards).
+    Returns (liquid_balance, staked_balance, validator_rewards, success, error_message)
     """
     # First convert validator operator address to account address
     account_address, addr_success, addr_error = get_validator_account_address(address)
     
     if not addr_success:
-        return 0.0, 0.0, 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
+        return 0.0, 0.0, 0.0, False, f"Address conversion failed: {addr_error}"
     
     # Get liquid balance using the account address
     liquid_balance, liquid_success, liquid_error = get_liquid_balance(account_address)
-    
-    # Get delegator rewards using the account address
-    delegator_rewards, delegator_success, delegator_error = get_delegator_rewards(account_address)
     
     # Get validator outstanding rewards using the original validator operator address
     validator_rewards, validator_success, validator_error = get_validator_outstanding_rewards(address)
@@ -943,8 +1018,8 @@ def get_validator_stake_balance(address: str) -> tuple[float, float, float, floa
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             # Return what we have even if staking query fails
-            success = liquid_success or delegator_success or validator_success
-            return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "No validator stake found"
+            success = liquid_success or validator_success
+            return liquid_balance, 0.0, validator_rewards, success, "No validator stake found"
         
         data = json.loads(result.stdout)
         validator = data.get("validator", {})
@@ -952,28 +1027,28 @@ def get_validator_stake_balance(address: str) -> tuple[float, float, float, floa
         
         if not tokens or tokens == "0":
             # Return what we have even if no stake
-            success = liquid_success or delegator_success or validator_success
-            return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "No validator stake found"
+            success = liquid_success or validator_success
+            return liquid_balance, 0.0, validator_rewards, success, "No validator stake found"
         
         # Convert from upokt to pokt (divide by 1,000,000)
         upokt_staked = int(tokens)
         pokt_staked = upokt_staked / 1_000_000
         
         # Return success if any balance exists
-        success = liquid_success or (pokt_staked > 0) or delegator_success or validator_success
+        success = liquid_success or (pokt_staked > 0) or validator_success
         error_msg = "" if success else "No balances found"
         
-        return liquid_balance, pokt_staked, delegator_rewards, validator_rewards, success, error_msg
+        return liquid_balance, pokt_staked, validator_rewards, success, error_msg
         
     except subprocess.TimeoutExpired:
-        success = liquid_success or delegator_success or validator_success
-        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "Validator stake query timeout"
+        success = liquid_success or validator_success
+        return liquid_balance, 0.0, validator_rewards, success, "Validator stake query timeout"
     except json.JSONDecodeError:
-        success = liquid_success or delegator_success or validator_success
-        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, "Invalid validator stake JSON response"
+        success = liquid_success or validator_success
+        return liquid_balance, 0.0, validator_rewards, success, "Invalid validator stake JSON response"
     except Exception as e:
-        success = liquid_success or delegator_success or validator_success
-        return liquid_balance, 0.0, delegator_rewards, validator_rewards, success, f"Validator stake error: {str(e)}"
+        success = liquid_success or validator_success
+        return liquid_balance, 0.0, validator_rewards, success, f"Validator stake error: {str(e)}"
 
 
 def query_liquid_balances_parallel(addresses: list[str], max_workers: int = 10) -> dict:
@@ -1099,6 +1174,49 @@ def query_node_stakes_parallel(addresses: list[str], max_workers: int = 10) -> d
     }
 
 
+def query_delegator_stakes_parallel(addresses: list[str], max_workers: int = 10) -> dict:
+    """
+    Query delegator stake balances for multiple addresses in parallel.
+    Returns dict with results and metadata for progress tracking.
+    """
+    results = {}
+    failed = []
+    completed_count = 0
+    total_count = len(addresses)
+    lock = threading.Lock()
+    
+    def query_single_delegator(address: str):
+        nonlocal completed_count
+        liquid_balance, delegator_rewards, success, error = get_delegator_stake_balance(address)
+        
+        with lock:
+            completed_count += 1
+            console.print(f"[dim]Delegator stake {completed_count}/{total_count}: {address}... done[/dim]")
+            
+            if success:
+                results[address] = {
+                    'liquid': liquid_balance,
+                    'delegator_rewards': delegator_rewards,
+                    'total': liquid_balance + delegator_rewards
+                }
+            else:
+                failed.append((address, error))
+    
+    # Execute queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(query_single_delegator, addr) for addr in addresses]
+        for future in as_completed(futures):
+            future.result()  # Wait for completion and handle exceptions
+    
+    return {
+        'results': results,
+        'failed': failed,
+        'total_liquid': sum(r['liquid'] for r in results.values()),
+        'total_delegator_rewards': sum(r['delegator_rewards'] for r in results.values()),
+        'total_combined': sum(r['total'] for r in results.values())
+    }
+
+
 def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10) -> dict:
     """
     Query validator stake balances for multiple addresses in parallel.
@@ -1112,7 +1230,7 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
     
     def query_single_validator(address: str):
         nonlocal completed_count
-        liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error = get_validator_stake_balance(address)
+        liquid_balance, staked_balance, validator_rewards, success, error = get_validator_stake_balance(address)
         
         with lock:
             completed_count += 1
@@ -1122,9 +1240,8 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
                 results[address] = {
                     'liquid': liquid_balance,
                     'staked': staked_balance,
-                    'delegator_rewards': delegator_rewards,
                     'validator_rewards': validator_rewards,
-                    'total': liquid_balance + staked_balance + delegator_rewards + validator_rewards
+                    'total': liquid_balance + staked_balance + validator_rewards
                 }
             else:
                 failed.append((address, error))
@@ -1140,7 +1257,6 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
         'failed': failed,
         'total_liquid': sum(r['liquid'] for r in results.values()),
         'total_staked': sum(r['staked'] for r in results.values()),
-        'total_delegator_rewards': sum(r['delegator_rewards'] for r in results.values()),
         'total_validator_rewards': sum(r['validator_rewards'] for r in results.values()),
         'total_combined': sum(r['total'] for r in results.values())
     }
@@ -1149,13 +1265,17 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
 @treasury_app.command()
 def app_stakes(
     ctx: typer.Context,
-    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'app_stakes' array)."),
 ):
     """
-    Calculate app stake balances (liquid + staked) for addresses listed in a file.
+    Calculate app stake balances (liquid + staked) for addresses.
+    
+    Supports two file formats:
+    1. Text file: One address per line
+    2. JSON file: Will extract addresses from 'app_stakes' array
     
     Required options:
-    --file: Path to file with addresses, one per line
+    --file: Path to file with addresses
     """
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
@@ -1172,8 +1292,7 @@ def app_stakes(
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
 
-    with addresses_file.open() as f:
-        addresses = [line.strip() for line in f if line.strip()]
+    addresses = load_addresses_from_file(addresses_file, "app_stakes")
 
     if not addresses:
         console.print("[red]No addresses found in the file. Exiting.[/red]")
@@ -1248,13 +1367,17 @@ def app_stakes(
 @treasury_app.command()
 def liquid_balance(
     ctx: typer.Context,
-    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'liquid' array)."),
 ):
     """
-    Calculate liquid balance for addresses listed in a file.
+    Calculate liquid balance for addresses.
+    
+    Supports two file formats:
+    1. Text file: One address per line
+    2. JSON file: Will extract addresses from 'liquid' array
     
     Required options:
-    --file: Path to file with addresses, one per line
+    --file: Path to file with addresses
     """
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
@@ -1271,8 +1394,7 @@ def liquid_balance(
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
 
-    with addresses_file.open() as f:
-        addresses = [line.strip() for line in f if line.strip()]
+    addresses = load_addresses_from_file(addresses_file, "liquid")
 
     if not addresses:
         console.print("[red]No addresses found in the file. Exiting.[/red]")
@@ -1335,13 +1457,17 @@ def liquid_balance(
 @treasury_app.command()
 def node_stakes(
     ctx: typer.Context,
-    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'node_stakes' array)."),
 ):
     """
-    Calculate node stake balances (liquid + staked) for addresses listed in a file.
+    Calculate node stake balances (liquid + staked) for addresses.
+    
+    Supports two file formats:
+    1. Text file: One address per line
+    2. JSON file: Will extract addresses from 'node_stakes' array
     
     Required options:
-    --file: Path to file with addresses, one per line
+    --file: Path to file with addresses
     """
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
@@ -1358,8 +1484,7 @@ def node_stakes(
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
 
-    with addresses_file.open() as f:
-        addresses = [line.strip() for line in f if line.strip()]
+    addresses = load_addresses_from_file(addresses_file, "node_stakes")
 
     if not addresses:
         console.print("[red]No addresses found in the file. Exiting.[/red]")
@@ -1434,13 +1559,17 @@ def node_stakes(
 @treasury_app.command()
 def validator_stakes(
     ctx: typer.Context,
-    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses, one per line."),
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'validator_stakes' array)."),
 ):
     """
-    Calculate validator stake balances (liquid + staked + delegator rewards + validator rewards) for addresses listed in a file.
+    Calculate validator stake balances (liquid + staked + validator rewards) for addresses.
+    
+    Supports two file formats:
+    1. Text file: One address per line
+    2. JSON file: Will extract addresses from 'validator_stakes' array
     
     Required options:
-    --file: Path to file with addresses, one per line
+    --file: Path to file with addresses
     """
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
@@ -1457,8 +1586,7 @@ def validator_stakes(
         console.print(f"[red]File not found:[/red] {addresses_file}")
         raise typer.Exit(1)
 
-    with addresses_file.open() as f:
-        addresses = [line.strip() for line in f if line.strip()]
+    addresses = load_addresses_from_file(addresses_file, "validator_stakes")
 
     if not addresses:
         console.print("[red]No addresses found in the file. Exiting.[/red]")
@@ -1471,7 +1599,6 @@ def validator_stakes(
     table.add_column("Address", style="cyan", no_wrap=True)
     table.add_column("Liquid (POKT)", justify="right", style="green")
     table.add_column("Staked (POKT)", justify="right", style="blue")
-    table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
     table.add_column("Validator Rewards (POKT)", justify="right", style="magenta")
     table.add_column("Total (POKT)", justify="right", style="bold white")
     table.add_column("Status", justify="center")
@@ -1480,26 +1607,23 @@ def validator_stakes(
     failed_addresses = []
     total_liquid = 0.0
     total_staked = 0.0
-    total_delegator_rewards = 0.0
     total_validator_rewards = 0.0
     
     for i, address in enumerate(addresses, 1):
         console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
         
-        liquid_balance, staked_balance, delegator_rewards, validator_rewards, success, error = get_validator_stake_balance(address)
-        total_balance = liquid_balance + staked_balance + delegator_rewards + validator_rewards
+        liquid_balance, staked_balance, validator_rewards, success, error = get_validator_stake_balance(address)
+        total_balance = liquid_balance + staked_balance + validator_rewards
         
         if success:
-            successful_queries.append((address, liquid_balance, staked_balance, delegator_rewards, validator_rewards, total_balance))
+            successful_queries.append((address, liquid_balance, staked_balance, validator_rewards, total_balance))
             total_liquid += liquid_balance
             total_staked += staked_balance
-            total_delegator_rewards += delegator_rewards
             total_validator_rewards += validator_rewards
             table.add_row(
                 address,
                 f"{liquid_balance:,.2f}",
                 f"{staked_balance:,.2f}",
-                f"{delegator_rewards:,.2f}",
                 f"{validator_rewards:,.2f}",
                 f"{total_balance:,.2f}",
                 "[green]✓[/green]"
@@ -1512,18 +1636,16 @@ def validator_stakes(
                 "0.00", 
                 "0.00",
                 "0.00",
-                "0.00",
                 "[red]✗[/red]"
             )
     
     # Add separator row and totals
     table.add_section()
-    grand_total = total_liquid + total_staked + total_delegator_rewards + total_validator_rewards
+    grand_total = total_liquid + total_staked + total_validator_rewards
     table.add_row(
         "[bold]TOTAL[/bold]",
         f"[bold green]{total_liquid:,.2f}[/bold green]",
         f"[bold blue]{total_staked:,.2f}[/bold blue]",
-        f"[bold yellow]{total_delegator_rewards:,.2f}[/bold yellow]",
         f"[bold magenta]{total_validator_rewards:,.2f}[/bold magenta]",
         f"[bold white]{grand_total:,.2f}[/bold white]",
         f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
@@ -1542,6 +1664,142 @@ def validator_stakes(
             console.print(f"  [red]•[/red] {address}: {error}")
 
 
+@treasury_app.command()
+def delegator_stakes(
+    ctx: typer.Context,
+    addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'delegator_stakes' array)."),
+):
+    """
+    Calculate delegator stake balances (liquid + delegator rewards) for addresses.
+    
+    Supports two file formats:
+    1. Text file: One address per line
+    2. JSON file: Will extract addresses from 'delegator_stakes' array
+    
+    Required options:
+    --file: Path to file with addresses
+    """
+    if addresses_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Delegator Stakes Command Help:[/bold]")
+        console.print("Calculate delegator stake balances (liquid + delegator rewards) for addresses.\n")
+        console.print("[bold]Supported File Formats:[/bold]")
+        console.print("  • Text file: One address per line")
+        console.print("  • JSON file: Extracts from 'delegator_stakes' array")
+        console.print("\n[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to file with addresses")
+        console.print("\n[bold]Examples:[/bold]")
+        console.print("  pocketknife treasury-tools delegator-stakes --file addresses.txt")
+        console.print("  pocketknife treasury-tools delegator-stakes --file treasury.json")
+        console.print("\n[dim]Use 'pocketknife treasury-tools delegator-stakes --help' for full help.[/dim]")
+        raise typer.Exit(1)
+    
+    if not addresses_file.exists():
+        console.print(f"[red]File not found:[/red] {addresses_file}")
+        raise typer.Exit(1)
+
+    addresses = load_addresses_from_file(addresses_file, "delegator_stakes")
+
+    if not addresses:
+        console.print("[red]No addresses found in the file. Exiting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Querying delegator stake balances for {len(addresses)} addresses...[/yellow]")
+    
+    # Create table for results
+    table = Table(title="Delegator Stake Balance Report")
+    table.add_column("Address", style="cyan", no_wrap=True)
+    table.add_column("Liquid (POKT)", justify="right", style="green")
+    table.add_column("Delegator Rewards (POKT)", justify="right", style="yellow")
+    table.add_column("Total (POKT)", justify="right", style="bold white")
+    table.add_column("Status", justify="center")
+    
+    successful_queries = []
+    failed_addresses = []
+    total_liquid = 0.0
+    total_delegator_rewards = 0.0
+    
+    for i, address in enumerate(addresses, 1):
+        console.print(f"[dim]Querying {i}/{len(addresses)}: {address}[/dim]")
+        
+        liquid_balance, delegator_rewards, success, error = get_delegator_stake_balance(address)
+        total_balance = liquid_balance + delegator_rewards
+        
+        if success:
+            successful_queries.append((address, liquid_balance, delegator_rewards, total_balance))
+            total_liquid += liquid_balance
+            total_delegator_rewards += delegator_rewards
+            table.add_row(
+                address,
+                f"{liquid_balance:,.2f}",
+                f"{delegator_rewards:,.2f}",
+                f"{total_balance:,.2f}",
+                "[green]✓[/green]"
+            )
+        else:
+            failed_addresses.append((address, error))
+            table.add_row(
+                address,
+                "0.00",
+                "0.00",
+                "0.00",
+                "[red]✗[/red]"
+            )
+    
+    # Add separator row and totals
+    table.add_section()
+    grand_total = total_liquid + total_delegator_rewards
+    table.add_row(
+        "[bold]TOTAL[/bold]",
+        f"[bold green]{total_liquid:,.2f}[/bold green]",
+        f"[bold yellow]{total_delegator_rewards:,.2f}[/bold yellow]",
+        f"[bold white]{grand_total:,.2f}[/bold white]",
+        f"[dim]{len(successful_queries)}/{len(addresses)}[/dim]"
+    )
+    
+    # Display results table
+    console.print("\n")
+    console.print(table)
+    
+    console.print(f"[dim]Successfully queried: {len(successful_queries)}/{len(addresses)} addresses[/dim]")
+    
+    # Show failed addresses if any
+    if failed_addresses:
+        console.print(f"\n[red]Failed to query {len(failed_addresses)} addresses:[/red]")
+        for address, error in failed_addresses:
+            console.print(f"  [red]•[/red] {address}: {error}")
+
+
+def load_addresses_from_file(file_path: Path, json_key: str) -> list[str]:
+    """
+    Load addresses from either a JSON file (extracting the specified key) or a text file.
+    Returns list of addresses.
+    """
+    try:
+        with file_path.open() as f:
+            content = f.read().strip()
+            if content.startswith('{'):
+                # It's a JSON file
+                treasury_data = json.loads(content)
+                addresses = treasury_data.get(json_key, [])
+                if addresses:
+                    console.print(f"[dim]Loaded {len(addresses)} addresses from '{json_key}' section[/dim]")
+                return addresses
+            else:
+                # It's a text file
+                addresses = [line.strip() for line in content.split('\n') if line.strip()]
+                if addresses:
+                    console.print(f"[dim]Loaded {len(addresses)} addresses from text file[/dim]")
+                return addresses
+    except json.JSONDecodeError:
+        # Fall back to text file parsing
+        with file_path.open() as f:
+            addresses = [line.strip() for line in f if line.strip()]
+            if addresses:
+                console.print(f"[dim]Loaded {len(addresses)} addresses from text file[/dim]")
+            return addresses
+
+
 def validate_and_deduplicate_addresses(data: dict) -> dict:
     """
     Validate and deduplicate addresses in treasury data.
@@ -1551,9 +1809,10 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
     app_stakes = data.get("app_stakes", [])
     node_stakes = data.get("node_stakes", [])
     validator_stakes = data.get("validator_stakes", [])
+    delegator_stakes = data.get("delegator_stakes", [])
     
     # Check for duplicates within each array
-    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes)]:
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes), ("delegator_stakes", delegator_stakes)]:
         if len(addresses) != len(set(addresses)):
             duplicates = [addr for addr in addresses if addresses.count(addr) > 1]
             unique_duplicates = list(set(duplicates))
@@ -1567,7 +1826,7 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
     all_addresses = set()
     conflicts = {}
     
-    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes)]:
+    for array_name, addresses in [("liquid", liquid), ("app_stakes", app_stakes), ("node_stakes", node_stakes), ("validator_stakes", validator_stakes), ("delegator_stakes", delegator_stakes)]:
         for addr in addresses:
             if addr in all_addresses:
                 if addr not in conflicts:
@@ -1586,7 +1845,7 @@ def validate_and_deduplicate_addresses(data: dict) -> dict:
             console.print(f"  [red]•[/red] {addr} appears in: {', '.join(arrays)}")
         
         console.print("\n[yellow]Recommendation: Remove these addresses from the 'liquid' array since[/yellow]")
-        console.print("[yellow]app_stakes, node_stakes, and validator_stakes already calculate liquid balances.[/yellow]")
+        console.print("[yellow]app_stakes, node_stakes, validator_stakes, and delegator_stakes already calculate liquid balances.[/yellow]")
         console.print("\n[yellow]Please fix the duplicate addresses and try again.[/yellow]")
         raise typer.Exit(1)
     

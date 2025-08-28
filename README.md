@@ -17,7 +17,8 @@
 |---------|-------------|--------------|
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
-| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake types<br>• Includes delegator and validator rewards for validators<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
+| **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake, delegator stake types<br>• Separates delegator rewards into dedicated section<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
+| **treasury-tools** | Individual balance type analysis | • All subcommands now support both text files and JSON files<br>• JSON files automatically extract from appropriate arrays<br>• Perfect for focused analysis of specific address types<br>• Backward compatible with existing text files |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
 
 ## Installation
@@ -151,13 +152,19 @@ Successfully saved 670 operator addresses!
 
 ### Treasury Balance Operations
 
-> **New Feature:** Validator stakes now include delegator and validator rewards for complete balance analysis!
+> **Major Update:** 
+> - **New:** Delegator rewards now calculated separately in `delegator_stakes` section for improved liquidity analysis
+> - **New:** All treasury-tools subcommands now support JSON files (auto-extracts from appropriate arrays)
+> - **Enhanced:** Flexible workflow - use main `treasury` command for complete analysis or subcommands for focused review
 
 <details>
 <summary>Individual Balance Calculations (Click to expand)</summary>
 
+> **New Feature:** All treasury-tools subcommands now support both text files and JSON files!
+
 #### Liquid Balance Calculation
 
+**Option 1: Text File**
 1. **Create address list**
    ```txt
    pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r
@@ -169,24 +176,74 @@ Successfully saved 670 operator addresses!
    pocketknife treasury-tools liquid-balance --file /path/to/addresses.txt
    ```
 
+**Option 2: JSON File** _(Extracts from `"liquid"` array)_
+   ```bash
+   pocketknife treasury-tools liquid-balance --file /path/to/treasury.json
+   ```
+
 #### App Stake Balance Calculation
 
+**Option 1: Text File**
 1. **Create app stake address list**
 2. **Query app stake balances**
    ```bash
    pocketknife treasury-tools app-stakes --file /path/to/app_addresses.txt
    ```
 
+**Option 2: JSON File** _(Extracts from `"app_stakes"` array)_
+   ```bash
+   pocketknife treasury-tools app-stakes --file /path/to/treasury.json
+   ```
+
 #### Node Stake Balance Calculation
 
+**Option 1: Text File**
 1. **Create node stake address list**
 2. **Query node stake balances**
    ```bash
    pocketknife treasury-tools node-stakes --file /path/to/node_addresses.txt
    ```
 
+**Option 2: JSON File** _(Extracts from `"node_stakes"` array)_
+   ```bash
+   pocketknife treasury-tools node-stakes --file /path/to/treasury.json
+   ```
+
+#### Delegator Stake Balance Calculation
+
+**Option 1: Text File**
+1. **Create delegator stake address list**
+   ```txt
+   pokt1ym80acz6s4vr2afwa9cjs0n55uqa588hstfce0
+   pokt1another5delegator6address
+   ```
+
+2. **Query delegator stake balances**
+   ```bash
+   pocketknife treasury-tools delegator-stakes --file /path/to/delegator_addresses.txt
+   ```
+
+**Option 2: JSON File** _(Extracts from `"delegator_stakes"` array)_
+   ```bash
+   pocketknife treasury-tools delegator-stakes --file /path/to/treasury.json
+   ```
+
+   **Technical Details:** The delegator stakes query performs:
+   1. Queries liquid balance using the account address
+   2. Queries delegator rewards using account address (`pocketd query distribution rewards`)
+   
+   **Reward Calculations:**
+   - **Delegator Rewards:** Sums all `upokt` rewards from distribution rewards query
+   - **Conversion:** All amounts converted from `upokt` to `POKT` (divided by 1,000,000)
+   
+   **Output includes:**
+   - Liquid balance (POKT)
+   - Delegator rewards (POKT)
+   - Total combined balance (POKT)
+
 #### Validator Stake Balance Calculation
 
+**Option 1: Text File**
 1. **Create validator stake address list**
    ```txt
    poktvaloper1ugqztuk8x5fa356adpv6r9y7r9mdq0p47h2vpq
@@ -198,26 +255,46 @@ Successfully saved 670 operator addresses!
    pocketknife treasury-tools validator-stakes --file /path/to/validator_addresses.txt
    ```
 
+**Option 2: JSON File** _(Extracts from `"validator_stakes"` array)_
+   ```bash
+   pocketknife treasury-tools validator-stakes --file /path/to/treasury.json
+   ```
+
    > **Note:** Use validator operator addresses (`poktvaloper1...`), not consensus addresses (`poktvalcons1...`)
    
    **Technical Details:** The validator stakes query performs a comprehensive analysis:
    1. Converts validator operator address to account address using `pocketd debug addr`
    2. Queries liquid balance using account address
-   3. Queries delegator rewards using account address (`pocketd query distribution rewards`)
-   4. Queries validator outstanding rewards using operator address (`pocketd query distribution validator-outstanding-rewards`)
-   5. Queries staked balance using operator address (`pocketd query staking validator`)
+   3. Queries validator outstanding rewards using operator address (`pocketd query distribution validator-outstanding-rewards`)
+   4. Queries staked balance using operator address (`pocketd query staking validator`)
    
    **Reward Calculations:**
-   - **Delegator Rewards:** Sums all `upokt` rewards from distribution rewards query
    - **Validator Outstanding Rewards:** Sums all `upokt` rewards from validator outstanding rewards query
    - **Conversion:** All amounts converted from `upokt` to `POKT` (divided by 1,000,000)
    
    **Output includes:**
    - Liquid balance (POKT)
    - Staked balance (POKT) 
-   - Delegator rewards (POKT)
    - Validator outstanding rewards (POKT)
    - Total combined balance (POKT)
+
+#### 🎯 **Key Benefits of JSON Support**
+
+- **No File Conversion**: Use your existing treasury JSON files directly
+- **Focused Analysis**: Process just one address type at a time for detailed review  
+- **Efficient Testing**: Test specific address categories without processing everything
+- **Flexible Workflow**: Choose between comprehensive analysis (main `treasury` command) or targeted analysis (subcommands)
+
+**Example with comprehensive JSON file:**
+```bash
+# Process all sections at once
+pocketknife treasury --file treasury.json
+
+# Or focus on specific sections
+pocketknife treasury-tools liquid-balance --file treasury.json     # Only liquid addresses
+pocketknife treasury-tools delegator-stakes --file treasury.json  # Only delegator addresses  
+pocketknife treasury-tools validator-stakes --file treasury.json  # Only validator addresses
+```
 
 </details>
 
@@ -241,6 +318,10 @@ Successfully saved 670 operator addresses!
      ],
      "validator_stakes": [
        "poktvaloper1ugqztuk8x5fa356adpv6r9y7r9mdq0p47h2vpq"
+     ],
+     "delegator_stakes": [
+       "pokt1ym80acz6s4vr2afwa9cjs0n55uqa588hstfce0",
+       "pokt1another5delegator6address"
      ]
    }
    ```
@@ -256,7 +337,8 @@ Successfully saved 670 operator addresses!
    - Liquid balances (if provided)
    - App stake balances with liquid + staked columns
    - Node stake balances with liquid + staked columns
-   - Validator stake balances with liquid + staked + delegator rewards + validator rewards columns
+   - Validator stake balances with liquid + staked + validator rewards columns
+   - Delegator stake balances with liquid + delegator rewards columns
    - **Grand total summary** across all categories
    - **Duplicate detection** prevents double-counting
 
