@@ -1,13 +1,11 @@
 import typer
 import subprocess
 import json
-import re
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
-import time
 
 app = typer.Typer(help="Pocketknife CLI: Syntactic sugar for poktroll operations.")
 

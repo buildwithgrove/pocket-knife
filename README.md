@@ -23,7 +23,25 @@
 
 ## Installation
 
-### Prerequisites
+> **Quick Start:** Use the included Makefile for easy installation on macOS and Linux!
+
+### Option 1: Makefile Installation (Recommended)
+
+```bash
+git clone https://github.com/yourusername/pocket-knife.git
+cd pocket-knife
+make install
+```
+
+**Available Makefile commands:**
+```bash
+make install     # Install/update globally
+make clean       # Clean build artifacts
+```
+
+### Option 2: Manual Installation
+
+#### Prerequisites
 - Python 3.8+
 - `pocketd` CLI tool installed and configured
 
@@ -48,14 +66,22 @@ pocketknife --help
 ```
 
 **To update:**
+
 ```bash
 cd pocket-knife
-git pull
-pipx reinstall .
+make install
 ```
 
 ### Local Development Setup
 
+**With Makefile (Recommended):**
+```bash
+git clone https://github.com/yourusername/pocket-knife.git
+cd pocket-knife
+make install
+```
+
+**Manual setup:**
 1. **Clone the repository**
    ```bash
    git clone https://github.com/yourusername/pocket-knife.git
@@ -71,6 +97,7 @@ pipx reinstall .
 3. **Install dependencies**
    ```bash
    pip install -r requirements.txt
+   pip install -e .  # Install in editable mode
    ```
 
 4. **You're ready!**
