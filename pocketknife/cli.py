@@ -18,25 +18,27 @@ console = Console()
 def main(ctx: typer.Context):
     """
     Pocketknife CLI: Syntactic sugar for poktroll operations.
-    
+
     Available commands:
     - delete-keys: Delete keys from keyring
-    - fetch-suppliers: Fetch supplier addresses  
+    - fetch-suppliers: Fetch supplier addresses
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
+    - update-revshare: Update rev_share addresses in supplier configs
     - treasury-tools: Specific treasury operations
     """
     if ctx.invoked_subcommand is None:
         console.print("[bold blue]Pocketknife CLI[/bold blue]")
         console.print("Syntactic sugar for poktroll operations.\n")
-        
+
         console.print("[bold]Available Commands:[/bold]")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
-        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances") 
+        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
-        
+        console.print("  [cyan]update-revshare[/cyan]  Update rev_share addresses in supplier configs")
+
         console.print("\n[dim]Use 'pocketknife [COMMAND] --help' for more information about a command.[/dim]")
         ctx.exit(0)
 
@@ -1887,7 +1889,7 @@ def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
     Returns a sorted list of unique operator addresses.
     """
     console.print(f"[yellow]Fetching suppliers for owner: {owner_address}[/yellow]")
-    
+
     cmd = [
         "pocketd", "q", "supplier", "list-suppliers",
         "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
@@ -1896,25 +1898,25 @@ def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
         "--page-limit=100000",
         "--page-count-total"
     ]
-    
+
     try:
         console.print("[dim]Querying blockchain for all suppliers...[/dim]")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        
+
         if result.returncode != 0:
             console.print(f"[red]Error fetching suppliers:[/red] {result.stderr.strip()}")
             raise typer.Exit(1)
-        
+
         console.print("[dim]Parsing supplier data...[/dim]")
         data = json.loads(result.stdout)
         suppliers = data.get("supplier", [])
-        
+
         if not suppliers:
             console.print("[red]No suppliers found in the response[/red]")
             raise typer.Exit(1)
-        
+
         console.print(f"[dim]Found {len(suppliers)} total suppliers, filtering for owner...[/dim]")
-        
+
         # Filter suppliers by owner address and collect operator addresses
         operator_addresses = []
         for supplier in suppliers:
@@ -1923,14 +1925,14 @@ def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
                 if operator_addr:
                     operator_addresses.append(operator_addr)
                     console.print(f"[green]  ✓[/green] {operator_addr}")
-        
+
         # Sort and deduplicate
         unique_addresses = sorted(set(operator_addresses))
-        
+
         console.print(f"\n[cyan]Found {len(operator_addresses)} supplier(s) ({len(unique_addresses)} unique)[/cyan]")
-        
+
         return unique_addresses
-        
+
     except subprocess.TimeoutExpired:
         console.print("[red]Timeout: Query took too long (>2 minutes)[/red]")
         raise typer.Exit(1)
@@ -1940,6 +1942,229 @@ def fetch_suppliers_for_owner(owner_address: str) -> list[str]:
     except Exception as e:
         console.print(f"[red]Unexpected error:[/red] {e}")
         raise typer.Exit(1)
+
+
+def get_supplier_yaml(supplier_address: str) -> tuple[str, bool, str]:
+    """
+    Fetch supplier YAML configuration from blockchain.
+    Returns (yaml_content, success, error_message)
+    """
+    cmd = [
+        "pocketd", "q", "supplier", "show-supplier", supplier_address,
+        "--node", "https://shannon-grove-rpc.mainnet.poktroll.com",
+        "--output", "yaml"
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            return "", False, result.stderr.strip() or "Failed to fetch supplier"
+
+        return result.stdout, True, ""
+
+    except subprocess.TimeoutExpired:
+        return "", False, "Query timeout"
+    except Exception as e:
+        return "", False, str(e)
+
+
+def update_revshare_in_yaml(yaml_content: str, old_address: str, new_address: str) -> tuple[str, int]:
+    """
+    Update all instances of old_address with new_address in YAML content.
+    Returns (updated_yaml, count_of_replacements)
+    """
+    count = yaml_content.count(old_address)
+    updated_yaml = yaml_content.replace(old_address, new_address)
+    return updated_yaml, count
+
+
+@app.command()
+def update_revshare(
+    ctx: typer.Context,
+    suppliers_file: Path = typer.Option(None, "--file", help="Path to JSON file with supplier addresses and rev_share update info."),
+    output_dir: Path = typer.Option(Path("./updated_suppliers"), "--output-dir", help="Directory to save updated YAML files (default: ./updated_suppliers)"),
+):
+    """
+    Update rev_share addresses in supplier configurations.
+
+    This command will:
+    1. Query each supplier's current configuration
+    2. Replace all instances of the old rev_share address with the new one
+    3. Save the updated YAML to files for restaking
+
+    Required options:
+    --file: Path to JSON file with format: {"old_address": "pokt1...", "new_address": "pokt1...", "suppliers": ["pokt1...", ...]}
+
+    Optional options:
+    --output-dir: Directory to save updated YAML files (default: ./updated_suppliers)
+    """
+    # Check for missing required options
+    if suppliers_file is None:
+        console.print("[red]Error: Missing required option '--file'[/red]\n")
+        console.print("[bold]Update RevShare Command Help:[/bold]")
+        console.print("Update rev_share addresses in supplier configurations.\n")
+        console.print("[bold]Required Options:[/bold]")
+        console.print("  [cyan]--file[/cyan]  Path to JSON file with supplier addresses and rev_share info")
+        console.print("\n[bold]JSON Format:[/bold]")
+        console.print('  {')
+        console.print('    "old_address": "pokt1oldrevshareaddress...",')
+        console.print('    "new_address": "pokt1newrevshareaddress...",')
+        console.print('    "suppliers": [')
+        console.print('      "pokt1supplier1address...",')
+        console.print('      "pokt1supplier2address..."')
+        console.print('    ]')
+        console.print('  }')
+        console.print("\n[bold]Optional Options:[/bold]")
+        console.print("  [cyan]--output-dir[/cyan]  Directory to save updated YAML files (default: ./updated_suppliers)")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife update-revshare --file revshare_update.json")
+        console.print("\n[dim]Use 'pocketknife update-revshare --help' for full help.[/dim]")
+        raise typer.Exit(1)
+
+    if not suppliers_file.exists():
+        console.print(f"[red]File not found:[/red] {suppliers_file}")
+        raise typer.Exit(1)
+
+    # Load and validate JSON file
+    try:
+        with suppliers_file.open() as f:
+            data = json.load(f)
+
+        # Validate JSON structure
+        if not isinstance(data, dict):
+            console.print("[red]Invalid JSON format: Root element must be an object[/red]")
+            raise typer.Exit(1)
+
+        old_address = data.get("old_address")
+        new_address = data.get("new_address")
+        addresses = data.get("suppliers", [])
+
+        if not old_address or not new_address or not addresses:
+            console.print("[red]Invalid JSON format: Missing required fields[/red]")
+            console.print("[yellow]Required fields: old_address, new_address, suppliers[/yellow]")
+            raise typer.Exit(1)
+
+        if not isinstance(addresses, list):
+            console.print("[red]Invalid JSON format: 'suppliers' must be an array[/red]")
+            raise typer.Exit(1)
+
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Invalid JSON file:[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error reading file:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Validate address formats
+    if not old_address.startswith("pokt1") or len(old_address) != 43:
+        console.print(f"[red]Invalid old_address format:[/red] {old_address}")
+        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
+        raise typer.Exit(1)
+
+    if not new_address.startswith("pokt1") or len(new_address) != 43:
+        console.print(f"[red]Invalid new_address format:[/red] {new_address}")
+        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
+        raise typer.Exit(1)
+
+    if not addresses:
+        console.print("[red]No addresses found in the file. Exiting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[yellow]Updating rev_share addresses for {len(addresses)} suppliers...[/yellow]")
+    console.print(f"[dim]Old address: {old_address}[/dim]")
+    console.print(f"[dim]New address: {new_address}[/dim]")
+    console.print(f"[dim]Output directory: {output_dir}[/dim]\n")
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Track results
+    successful = []
+    failed = []
+    total_replacements = 0
+
+    # Create results table
+    table = Table(title="RevShare Update Report")
+    table.add_column("Supplier Address", style="cyan", no_wrap=True)
+    table.add_column("Replacements", justify="right", style="yellow")
+    table.add_column("Status", justify="center")
+
+    for i, supplier_address in enumerate(addresses, 1):
+        console.print(f"[dim]Processing {i}/{len(addresses)}: {supplier_address}[/dim]")
+
+        # Fetch supplier YAML
+        yaml_content, success, error = get_supplier_yaml(supplier_address)
+
+        if not success:
+            failed.append((supplier_address, error))
+            table.add_row(
+                supplier_address,
+                "0",
+                "[red]✗ Failed[/red]"
+            )
+            console.print(f"  [red]✗ Failed to fetch: {error}[/red]")
+            continue
+
+        # Check if old address exists in YAML
+        if old_address not in yaml_content:
+            console.print(f"  [yellow]⚠ Old address not found in config[/yellow]")
+            table.add_row(
+                supplier_address,
+                "0",
+                "[yellow]⚠ Not found[/yellow]"
+            )
+            continue
+
+        # Update addresses in YAML
+        updated_yaml, replacement_count = update_revshare_in_yaml(yaml_content, old_address, new_address)
+        total_replacements += replacement_count
+
+        # Save to file
+        output_file = output_dir / f"{supplier_address}.yaml"
+        try:
+            with output_file.open('w') as f:
+                f.write(updated_yaml)
+
+            successful.append((supplier_address, replacement_count))
+            table.add_row(
+                supplier_address,
+                str(replacement_count),
+                "[green]✓[/green]"
+            )
+            console.print(f"  [green]✓ Updated {replacement_count} instance(s) → {output_file.name}[/green]")
+
+        except Exception as e:
+            failed.append((supplier_address, f"Failed to write file: {str(e)}"))
+            table.add_row(
+                supplier_address,
+                str(replacement_count),
+                "[red]✗ Write failed[/red]"
+            )
+            console.print(f"  [red]✗ Failed to write file: {str(e)}[/red]")
+
+    # Display summary table
+    console.print("\n")
+    console.print(table)
+
+    # Display summary
+    console.print("\n" + "="*60)
+    console.print("[bold]UPDATE SUMMARY[/bold]")
+    console.print("="*60)
+    console.print(f"[green]Successfully updated:[/green]      {len(successful)}/{len(addresses)}")
+    console.print(f"[red]Failed:[/red]                     {len(failed)}/{len(addresses)}")
+    console.print(f"[yellow]Total replacements:[/yellow]       {total_replacements}")
+    console.print(f"[cyan]Output directory:[/cyan]          {output_dir.absolute()}")
+    console.print("="*60)
+
+    if failed:
+        console.print(f"\n[red]Failed suppliers ({len(failed)}):[/red]")
+        for address, error in failed:
+            console.print(f"  [red]•[/red] {address}: {error}")
+
+    if successful:
+        console.print(f"\n[green]✓ Successfully updated {len(successful)} supplier configuration(s)[/green]")
+        console.print(f"[dim]Updated YAML files are saved in: {output_dir.absolute()}[/dim]")
+        console.print(f"[dim]Use these files for restaking operations[/dim]")
 
 
 
