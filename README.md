@@ -20,6 +20,7 @@
 | **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake, delegator stake types<br>• Separates delegator rewards into dedicated section<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **treasury-tools** | Individual balance type analysis | • All subcommands now support both text files and JSON files<br>• JSON files automatically extract from appropriate arrays<br>• Perfect for focused analysis of specific address types<br>• Backward compatible with existing text files |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
+| **update-revshare** | Update rev_share addresses in supplier configs | • JSON-based configuration<br>• Batch update multiple suppliers<br>• Replaces all instances of old address<br>• Saves updated YAML files for restaking<br>• Detailed progress tracking |
 
 ## Installation
 
@@ -386,6 +387,110 @@ pocketknife treasury-tools validator-stakes --file treasury.json  # Only validat
    ```
 
    > **Note:** The signer key must exist in the `test` keyring backend.
+
+### Updating Revenue Share Addresses
+
+> Batch update rev_share addresses across multiple supplier configurations
+
+**Use case:** Perfect for treasury management when you need to update the revenue share address for multiple suppliers at once. This command queries each supplier's current configuration, replaces all instances of the old rev_share address, and generates updated YAML files ready for restaking.
+
+#### JSON Configuration Format
+
+Create a JSON file with three required fields:
+
+```json
+{
+  "old_address": "pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r",
+  "new_address": "pokt1la0mzur79w7vgk2stun4llqlgaqa2f3rg20jvj",
+  "suppliers": [
+    "pokt102k3lgmzcwxw9w33xzssreg6ledqdy2rrj0jd9",
+    "pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t",
+    "pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad"
+  ]
+}
+```
+
+**Field descriptions:**
+- `old_address`: The current rev_share address that needs to be replaced (must be valid pokt1 address)
+- `new_address`: The new rev_share address to use (must be valid pokt1 address)
+- `suppliers`: Array of supplier operator addresses to update (one or more valid pokt1 addresses)
+
+#### Command Usage
+
+```bash
+# Basic usage (saves to ./updated_suppliers by default)
+pocketknife update-revshare --file revshare_update.json
+
+# Specify custom output directory
+pocketknife update-revshare --file revshare_update.json --output-dir ./my_updated_configs
+```
+
+#### What It Does
+
+1. **Validates input:** Checks that all addresses are properly formatted (pokt1... with 43 characters)
+2. **Queries blockchain:** Fetches current configuration for each supplier using `pocketd q supplier show-supplier`
+3. **Updates addresses:** Replaces all instances of the old rev_share address with the new one
+4. **Saves YAML files:** Creates one `.yaml` file per supplier in the output directory, named `{supplier_address}.yaml`
+5. **Reports progress:** Shows detailed progress and summary of all operations
+
+#### Example Output
+
+```
+Updating rev_share addresses for 3 suppliers...
+Old address: pokt1meemgmujjuuq7u3vfgxzvlhdlujnh34fztjh2r
+New address: pokt1la0mzur79w7vgk2stun4llqlgaqa2f3rg20jvj
+Output directory: ./updated_configs
+
+Processing 1/3: pokt102k3lgmzcwxw9w33xzssreg6ledqdy2rrj0jd9
+  ✓ Updated 2 instance(s) → pokt102k3lgmzcwxw9w33xzssreg6ledqdy2rrj0jd9.yaml
+Processing 2/3: pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t
+  ✓ Updated 1 instance(s) → pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t.yaml
+Processing 3/3: pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad
+  ✓ Updated 2 instance(s) → pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad.yaml
+
+┌─────────────────────────────────────────────┬──────────────┬────────────┐
+│ Supplier Address                            │ Replacements │ Status     │
+├─────────────────────────────────────────────┼──────────────┼────────────┤
+│ pokt102k3lgmzcwxw9w33xzssreg6ledqdy2rrj0jd9 │            2 │ ✓          │
+│ pokt1usszlu77rtmt2skhp5pwyau543xc50k9sp250t │            1 │ ✓          │
+│ pokt1m8e43plgzzlaa3qvlz7uvpqc778y4f79rpk7ad │            2 │ ✓          │
+└─────────────────────────────────────────────┴──────────────┴────────────┘
+
+============================================================
+UPDATE SUMMARY
+============================================================
+Successfully updated:      3/3
+Failed:                    0/3
+Total replacements:        5
+Output directory:          /path/to/updated_configs
+============================================================
+
+✓ Successfully updated 3 supplier configuration(s)
+Updated YAML files are saved in: /path/to/updated_configs
+Use these files for restaking operations
+```
+
+#### Next Steps
+
+After running the command, you'll have updated YAML files ready to use with `pocketd` for restaking:
+
+```bash
+# Example restaking command (adjust parameters as needed)
+pocketd tx supplier stake-supplier \
+  --config ./updated_configs/pokt102k3lgmzcwxw9w33xzssreg6ledqdy2rrj0jd9.yaml \
+  --from YOUR_KEY_NAME \
+  --network main
+```
+
+#### Error Handling
+
+The command handles various error scenarios:
+- **Invalid addresses:** Validates format before processing (pokt1... with 43 characters)
+- **Query failures:** Reports if a supplier cannot be fetched from blockchain
+- **Address not found:** Notes if old address doesn't exist in a supplier's config
+- **Write failures:** Reports if YAML files cannot be saved
+
+Failed suppliers are clearly marked in the summary, allowing you to retry or investigate specific cases.
 
 ## Configuration
 
