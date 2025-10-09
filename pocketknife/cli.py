@@ -1,6 +1,7 @@
 import typer
 import subprocess
 import json
+import yaml
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
@@ -1970,19 +1971,53 @@ def get_supplier_yaml(supplier_address: str) -> tuple[str, bool, str]:
 
 def update_revshare_in_yaml(yaml_content: str, old_address: str, new_address: str) -> tuple[str, int]:
     """
-    Update all instances of old_address with new_address in YAML content.
+    Update rev_share addresses in YAML content, targeting only the rev_share.address fields.
     Returns (updated_yaml, count_of_replacements)
     """
-    count = yaml_content.count(old_address)
-    updated_yaml = yaml_content.replace(old_address, new_address)
-    return updated_yaml, count
+    
+    try:
+        # Parse YAML content
+        data = yaml.safe_load(yaml_content)
+        
+        if not isinstance(data, dict) or 'supplier' not in data:
+            # Fallback to string replacement if YAML structure is unexpected
+            count = yaml_content.count(old_address)
+            updated_yaml = yaml_content.replace(old_address, new_address)
+            return updated_yaml, count
+        
+        supplier = data['supplier']
+        replacement_count = 0
+        
+        # Navigate to services and update rev_share addresses
+        if 'services' in supplier and isinstance(supplier['services'], list):
+            for service in supplier['services']:
+                if 'rev_share' in service and isinstance(service['rev_share'], list):
+                    for rev_share_item in service['rev_share']:
+                        if 'address' in rev_share_item and rev_share_item['address'] == old_address:
+                            rev_share_item['address'] = new_address
+                            replacement_count += 1
+        
+        # Convert back to YAML
+        updated_yaml = yaml.dump(data, default_flow_style=False, sort_keys=False)
+        return updated_yaml, replacement_count
+        
+    except yaml.YAMLError:
+        # Fallback to string replacement if YAML parsing fails
+        count = yaml_content.count(old_address)
+        updated_yaml = yaml_content.replace(old_address, new_address)
+        return updated_yaml, count
+    except Exception:
+        # Fallback to string replacement for any other errors
+        count = yaml_content.count(old_address)
+        updated_yaml = yaml_content.replace(old_address, new_address)
+        return updated_yaml, count
 
 
 @app.command()
 def update_revshare(
     ctx: typer.Context,
-    suppliers_file: Path = typer.Option(None, "--file", help="Path to JSON file with supplier addresses and rev_share update info."),
-    output_dir: Path = typer.Option(Path("./updated_suppliers"), "--output-dir", help="Directory to save updated YAML files (default: ./updated_suppliers)"),
+    suppliers_file: Path = typer.Option(..., "--file", help="Path to JSON file with supplier addresses and rev_share update info."),
+    output_dir: Path = typer.Option(..., "--output-dir", help="Directory to save updated YAML files (required)"),
 ):
     """
     Update rev_share addresses in supplier configurations.
@@ -1994,33 +2029,8 @@ def update_revshare(
 
     Required options:
     --file: Path to JSON file with format: {"old_address": "pokt1...", "new_address": "pokt1...", "suppliers": ["pokt1...", ...]}
-
-    Optional options:
-    --output-dir: Directory to save updated YAML files (default: ./updated_suppliers)
+    --output-dir: Directory to save updated YAML files
     """
-    # Check for missing required options
-    if suppliers_file is None:
-        console.print("[red]Error: Missing required option '--file'[/red]\n")
-        console.print("[bold]Update RevShare Command Help:[/bold]")
-        console.print("Update rev_share addresses in supplier configurations.\n")
-        console.print("[bold]Required Options:[/bold]")
-        console.print("  [cyan]--file[/cyan]  Path to JSON file with supplier addresses and rev_share info")
-        console.print("\n[bold]JSON Format:[/bold]")
-        console.print('  {')
-        console.print('    "old_address": "pokt1oldrevshareaddress...",')
-        console.print('    "new_address": "pokt1newrevshareaddress...",')
-        console.print('    "suppliers": [')
-        console.print('      "pokt1supplier1address...",')
-        console.print('      "pokt1supplier2address..."')
-        console.print('    ]')
-        console.print('  }')
-        console.print("\n[bold]Optional Options:[/bold]")
-        console.print("  [cyan]--output-dir[/cyan]  Directory to save updated YAML files (default: ./updated_suppliers)")
-        console.print("\n[bold]Example:[/bold]")
-        console.print("  pocketknife update-revshare --file revshare_update.json")
-        console.print("\n[dim]Use 'pocketknife update-revshare --help' for full help.[/dim]")
-        raise typer.Exit(1)
-
     if not suppliers_file.exists():
         console.print(f"[red]File not found:[/red] {suppliers_file}")
         raise typer.Exit(1)
