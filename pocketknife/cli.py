@@ -2019,6 +2019,11 @@ def update_revshare(
     suppliers_file: Path = typer.Option(..., "--file", help="Path to JSON file with supplier addresses and rev_share update info."),
     output_dir: Path = typer.Option(..., "--output-dir", help="Directory to save updated YAML files (required)"),
     owner_address: str = typer.Option(..., "--owner", help="Owner address for restaking (must match all suppliers)"),
+    restake: bool = typer.Option(False, "--restake", help="Automatically run restaking commands after generating YAML files"),
+    gas_prices: str = typer.Option("0.000001upokt", "--gas-prices", help="Gas prices for restaking (default: 0.000001upokt)"),
+    gas_adjustment: str = typer.Option("1.7", "--gas-adjustment", help="Gas adjustment for restaking (default: 1.7)"),
+    keyring_backend: str = typer.Option("test", "--keyring-backend", help="Keyring backend for restaking (default: test)"),
+    network: str = typer.Option("main", "--network", help="Network for restaking (default: main)"),
 ):
     """
     Update rev_share addresses in supplier configurations.
@@ -2028,11 +2033,19 @@ def update_revshare(
     2. Replace all instances of the old rev_share address with the new one
     3. Validate that all suppliers have the same owner address
     4. Save the updated YAML to files for restaking
+    5. Optionally run restaking commands and show results
 
     Required options:
     --file: Path to JSON file with format: {"old_address": "pokt1...", "new_address": "pokt1...", "suppliers": ["pokt1...", ...]}
     --output-dir: Directory to save updated YAML files
     --owner: Owner address that must match all suppliers (for restaking)
+
+    Optional restaking options:
+    --restake: Automatically run restaking commands after generating YAML files
+    --gas-prices: Gas prices for restaking (default: 0.000001upokt)
+    --gas-adjustment: Gas adjustment for restaking (default: 1.7)
+    --keyring-backend: Keyring backend for restaking (default: test)
+    --network: Network for restaking (default: main)
     """
     if not suppliers_file.exists():
         console.print(f"[red]File not found:[/red] {suppliers_file}")
@@ -2318,7 +2331,81 @@ def update_revshare(
     if successful:
         console.print(f"\n[green]✓ Successfully updated {len(successful)} supplier configuration(s)[/green]")
         console.print(f"[dim]Updated YAML files are saved in: {output_dir.absolute()}[/dim]")
-        console.print(f"[dim]Use these files for restaking operations[/dim]")
+        
+        if restake:
+            console.print(f"\n[yellow]🚀 Starting restaking process...[/yellow]")
+            console.print(f"[dim]Gas prices: {gas_prices}[/dim]")
+            console.print(f"[dim]Gas adjustment: {gas_adjustment}[/dim]")
+            console.print(f"[dim]Keyring backend: {keyring_backend}[/dim]")
+            console.print(f"[dim]Network: {network}[/dim]\n")
+            
+            # Track restaking results
+            restake_successful = []
+            restake_failed = []
+            
+            # Get all YAML files that were successfully updated
+            yaml_files = []
+            for address, _ in successful:
+                yaml_file = output_dir / f"{address}.yaml"
+                if yaml_file.exists():
+                    yaml_files.append(yaml_file)
+            
+            for i, yaml_file in enumerate(yaml_files, 1):
+                console.print(f"[dim]Restaking {i}/{len(yaml_files)}: {yaml_file.name}[/dim]")
+                
+                # Build restaking command
+                cmd = [
+                    "pocketd", "tx", "supplier", "stake-supplier",
+                    f"--config={yaml_file}",
+                    f"--from={owner_address}",
+                    "--gas=auto",
+                    f"--gas-prices={gas_prices}",
+                    f"--gas-adjustment={gas_adjustment}",
+                    "--yes",
+                    f"--network={network}",
+                    f"--keyring-backend={keyring_backend}",
+                    "--unordered",
+                    "--timeout-duration=1m"
+                ]
+                
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                    
+                    if result.returncode == 0:
+                        restake_successful.append((yaml_file.name, result.stdout))
+                        console.print(f"  [green]✓ Restaking successful[/green]")
+                        if result.stdout.strip():
+                            console.print(f"  [dim]Output: {result.stdout.strip()[:100]}{'...' if len(result.stdout.strip()) > 100 else ''}[/dim]")
+                    else:
+                        restake_failed.append((yaml_file.name, result.stderr or result.stdout))
+                        console.print(f"  [red]✗ Restaking failed[/red]")
+                        console.print(f"  [red]Error: {result.stderr.strip() if result.stderr else result.stdout.strip()}[/red]")
+                        
+                except subprocess.TimeoutExpired:
+                    restake_failed.append((yaml_file.name, "Command timeout (2 minutes)"))
+                    console.print(f"  [red]✗ Restaking timeout[/red]")
+                except Exception as e:
+                    restake_failed.append((yaml_file.name, str(e)))
+                    console.print(f"  [red]✗ Restaking error: {str(e)}[/red]")
+            
+            # Display restaking summary
+            console.print("\n" + "="*60)
+            console.print("[bold]RESTAKING SUMMARY[/bold]")
+            console.print("="*60)
+            console.print(f"[green]Successfully restaked:[/green]    {len(restake_successful)}/{len(yaml_files)}")
+            console.print(f"[red]Failed to restake:[/red]        {len(restake_failed)}/{len(yaml_files)}")
+            console.print("="*60)
+            
+            if restake_failed:
+                console.print(f"\n[red]Failed restaking attempts ({len(restake_failed)}):[/red]")
+                for filename, error in restake_failed:
+                    console.print(f"  [red]•[/red] {filename}: {error}")
+            
+            if restake_successful:
+                console.print(f"\n[green]✓ Successfully restaked {len(restake_successful)} supplier(s)[/green]")
+        else:
+            console.print(f"[dim]Use these files for restaking operations[/dim]")
+            console.print(f"[dim]To auto-restake, use: --restake flag[/dim]")
 
 
 
