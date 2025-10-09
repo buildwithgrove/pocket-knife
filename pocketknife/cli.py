@@ -2100,67 +2100,131 @@ def update_revshare(
     table.add_column("Replacements", justify="right", style="yellow")
     table.add_column("Status", justify="center")
 
-    for i, supplier_address in enumerate(addresses, 1):
-        console.print(f"[dim]Processing {i}/{len(addresses)}: {supplier_address}[/dim]")
-
+    # Process suppliers in parallel
+    console.print(f"[dim]Processing {len(addresses)} suppliers in parallel...[/dim]")
+    
+    def process_supplier(supplier_address):
+        """Process a single supplier and return results"""
         # Fetch supplier YAML
         yaml_content, success, error = get_supplier_yaml(supplier_address)
-
+        
         if not success:
-            failed.append((supplier_address, error))
-            table.add_row(
-                supplier_address,
-                "0",
-                "[red]✗ Failed[/red]"
-            )
-            console.print(f"  [red]✗ Failed to fetch: {error}[/red]")
-            continue
-
+            return {
+                'address': supplier_address,
+                'status': 'failed',
+                'error': error,
+                'replacements': 0
+            }
+        
         # Check if old address exists in YAML
         if old_address not in yaml_content:
-            console.print(f"  [yellow]⚠ Old address not found in config[/yellow]")
-            table.add_row(
-                supplier_address,
-                "0",
-                "[yellow]⚠ Not found[/yellow]"
-            )
-            continue
-
+            return {
+                'address': supplier_address,
+                'status': 'not_found',
+                'error': 'Old address not found in config',
+                'replacements': 0
+            }
+        
         # Update addresses in YAML
         updated_yaml, replacement_count = update_revshare_in_yaml(yaml_content, old_address, new_address)
-        total_replacements += replacement_count
-
+        
         # Save to file
         output_file = output_dir / f"{supplier_address}.yaml"
         try:
             with output_file.open('w') as f:
                 f.write(updated_yaml)
-
+            
             if replacement_count > 0:
-                successful.append((supplier_address, replacement_count))
-                table.add_row(
-                    supplier_address,
-                    str(replacement_count),
-                    "[green]✓[/green]"
-                )
-                console.print(f"  [green]✓ Updated {replacement_count} instance(s) → {output_file.name}[/green]")
+                return {
+                    'address': supplier_address,
+                    'status': 'success',
+                    'error': None,
+                    'replacements': replacement_count,
+                    'output_file': output_file.name
+                }
             else:
-                no_replacements.append(supplier_address)
+                return {
+                    'address': supplier_address,
+                    'status': 'no_changes',
+                    'error': None,
+                    'replacements': 0,
+                    'output_file': output_file.name
+                }
+                
+        except Exception as e:
+            return {
+                'address': supplier_address,
+                'status': 'write_failed',
+                'error': f"Failed to write file: {str(e)}",
+                'replacements': replacement_count
+            }
+
+    # Use ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all tasks
+        future_to_address = {executor.submit(process_supplier, addr): addr for addr in addresses}
+        
+        # Process completed tasks
+        for i, future in enumerate(as_completed(future_to_address), 1):
+            supplier_address = future_to_address[future]
+            console.print(f"[dim]Completed {i}/{len(addresses)}: {supplier_address}[/dim]")
+            
+            try:
+                result = future.result()
+                
+                if result['status'] == 'success':
+                    successful.append((result['address'], result['replacements']))
+                    total_replacements += result['replacements']
+                    table.add_row(
+                        result['address'],
+                        str(result['replacements']),
+                        "[green]✓[/green]"
+                    )
+                    console.print(f"  [green]✓ Updated {result['replacements']} instance(s) → {result['output_file']}[/green]")
+                    
+                elif result['status'] == 'no_changes':
+                    no_replacements.append(result['address'])
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[blue]○ No changes[/blue]"
+                    )
+                    console.print(f"  [blue]○ No changes needed → {result['output_file']}[/blue]")
+                    
+                elif result['status'] == 'not_found':
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[yellow]⚠ Not found[/yellow]"
+                    )
+                    console.print(f"  [yellow]⚠ Old address not found in config[/yellow]")
+                    
+                elif result['status'] == 'write_failed':
+                    failed.append((result['address'], result['error']))
+                    table.add_row(
+                        result['address'],
+                        str(result['replacements']),
+                        "[red]✗ Write failed[/red]"
+                    )
+                    console.print(f"  [red]✗ {result['error']}[/red]")
+                    
+                else:  # failed
+                    failed.append((result['address'], result['error']))
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[red]✗ Failed[/red]"
+                    )
+                    console.print(f"  [red]✗ Failed to fetch: {result['error']}[/red]")
+                    
+            except Exception as e:
+                failed.append((supplier_address, f"Unexpected error: {str(e)}"))
                 table.add_row(
                     supplier_address,
                     "0",
-                    "[blue]○ No changes[/blue]"
+                    "[red]✗ Error[/red]"
                 )
-                console.print(f"  [blue]○ No changes needed → {output_file.name}[/blue]")
-
-        except Exception as e:
-            failed.append((supplier_address, f"Failed to write file: {str(e)}"))
-            table.add_row(
-                supplier_address,
-                str(replacement_count),
-                "[red]✗ Write failed[/red]"
-            )
-            console.print(f"  [red]✗ Failed to write file: {str(e)}[/red]")
+                console.print(f"  [red]✗ Unexpected error: {str(e)}[/red]")
 
     # Display summary table
     console.print("\n")
