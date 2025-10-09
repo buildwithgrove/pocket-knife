@@ -2018,6 +2018,7 @@ def update_revshare(
     ctx: typer.Context,
     suppliers_file: Path = typer.Option(..., "--file", help="Path to JSON file with supplier addresses and rev_share update info."),
     output_dir: Path = typer.Option(..., "--output-dir", help="Directory to save updated YAML files (required)"),
+    owner_address: str = typer.Option(..., "--owner", help="Owner address for restaking (must match all suppliers)"),
 ):
     """
     Update rev_share addresses in supplier configurations.
@@ -2025,11 +2026,13 @@ def update_revshare(
     This command will:
     1. Query each supplier's current configuration
     2. Replace all instances of the old rev_share address with the new one
-    3. Save the updated YAML to files for restaking
+    3. Validate that all suppliers have the same owner address
+    4. Save the updated YAML to files for restaking
 
     Required options:
     --file: Path to JSON file with format: {"old_address": "pokt1...", "new_address": "pokt1...", "suppliers": ["pokt1...", ...]}
     --output-dir: Directory to save updated YAML files
+    --owner: Owner address that must match all suppliers (for restaking)
     """
     if not suppliers_file.exists():
         console.print(f"[red]File not found:[/red] {suppliers_file}")
@@ -2076,6 +2079,11 @@ def update_revshare(
         console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
         raise typer.Exit(1)
 
+    if not owner_address.startswith("pokt1") or len(owner_address) != 43:
+        console.print(f"[red]Invalid owner_address format:[/red] {owner_address}")
+        console.print("[yellow]Expected format: pokt1... (43 characters)[/yellow]")
+        raise typer.Exit(1)
+
     if not addresses:
         console.print("[red]No addresses found in the file. Exiting.[/red]")
         raise typer.Exit(1)
@@ -2083,6 +2091,7 @@ def update_revshare(
     console.print(f"[yellow]Updating rev_share addresses for {len(addresses)} suppliers...[/yellow]")
     console.print(f"[dim]Old address: {old_address}[/dim]")
     console.print(f"[dim]New address: {new_address}[/dim]")
+    console.print(f"[dim]Owner address: {owner_address}[/dim]")
     console.print(f"[dim]Output directory: {output_dir}[/dim]\n")
 
     # Create output directory
@@ -2113,6 +2122,34 @@ def update_revshare(
                 'address': supplier_address,
                 'status': 'failed',
                 'error': error,
+                'replacements': 0
+            }
+        
+        # Parse YAML to check owner address
+        try:
+            import yaml
+            data = yaml.safe_load(yaml_content)
+            if not isinstance(data, dict) or 'supplier' not in data:
+                return {
+                    'address': supplier_address,
+                    'status': 'invalid_yaml',
+                    'error': 'Invalid YAML structure',
+                    'replacements': 0
+                }
+            
+            supplier_owner = data['supplier'].get('owner_address')
+            if supplier_owner != owner_address:
+                return {
+                    'address': supplier_address,
+                    'status': 'owner_mismatch',
+                    'error': f'Owner mismatch: expected {owner_address}, got {supplier_owner}',
+                    'replacements': 0
+                }
+        except Exception as e:
+            return {
+                'address': supplier_address,
+                'status': 'parse_error',
+                'error': f'Failed to parse YAML: {str(e)}',
                 'replacements': 0
             }
         
@@ -2205,6 +2242,33 @@ def update_revshare(
                         result['address'],
                         str(result['replacements']),
                         "[red]✗ Write failed[/red]"
+                    )
+                    console.print(f"  [red]✗ {result['error']}[/red]")
+                    
+                elif result['status'] == 'owner_mismatch':
+                    failed.append((result['address'], result['error']))
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[red]✗ Owner mismatch[/red]"
+                    )
+                    console.print(f"  [red]✗ {result['error']}[/red]")
+                    
+                elif result['status'] == 'invalid_yaml':
+                    failed.append((result['address'], result['error']))
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[red]✗ Invalid YAML[/red]"
+                    )
+                    console.print(f"  [red]✗ {result['error']}[/red]")
+                    
+                elif result['status'] == 'parse_error':
+                    failed.append((result['address'], result['error']))
+                    table.add_row(
+                        result['address'],
+                        "0",
+                        "[red]✗ Parse error[/red]"
                     )
                     console.print(f"  [red]✗ {result['error']}[/red]")
                     
