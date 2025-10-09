@@ -2091,6 +2091,7 @@ def update_revshare(
     # Track results
     successful = []
     failed = []
+    no_replacements = []  # Track files that didn't need any changes
     total_replacements = 0
 
     # Create results table
@@ -2135,13 +2136,22 @@ def update_revshare(
             with output_file.open('w') as f:
                 f.write(updated_yaml)
 
-            successful.append((supplier_address, replacement_count))
-            table.add_row(
-                supplier_address,
-                str(replacement_count),
-                "[green]✓[/green]"
-            )
-            console.print(f"  [green]✓ Updated {replacement_count} instance(s) → {output_file.name}[/green]")
+            if replacement_count > 0:
+                successful.append((supplier_address, replacement_count))
+                table.add_row(
+                    supplier_address,
+                    str(replacement_count),
+                    "[green]✓[/green]"
+                )
+                console.print(f"  [green]✓ Updated {replacement_count} instance(s) → {output_file.name}[/green]")
+            else:
+                no_replacements.append(supplier_address)
+                table.add_row(
+                    supplier_address,
+                    "0",
+                    "[blue]○ No changes[/blue]"
+                )
+                console.print(f"  [blue]○ No changes needed → {output_file.name}[/blue]")
 
         except Exception as e:
             failed.append((supplier_address, f"Failed to write file: {str(e)}"))
@@ -2161,6 +2171,7 @@ def update_revshare(
     console.print("[bold]UPDATE SUMMARY[/bold]")
     console.print("="*60)
     console.print(f"[green]Successfully updated:[/green]      {len(successful)}/{len(addresses)}")
+    console.print(f"[blue]No changes needed:[/blue]         {len(no_replacements)}/{len(addresses)}")
     console.print(f"[red]Failed:[/red]                     {len(failed)}/{len(addresses)}")
     console.print(f"[yellow]Total replacements:[/yellow]       {total_replacements}")
     console.print(f"[cyan]Output directory:[/cyan]          {output_dir.absolute()}")
@@ -2170,6 +2181,11 @@ def update_revshare(
         console.print(f"\n[red]Failed suppliers ({len(failed)}):[/red]")
         for address, error in failed:
             console.print(f"  [red]•[/red] {address}: {error}")
+
+    if no_replacements:
+        console.print(f"\n[blue]No changes needed ({len(no_replacements)}):[/blue]")
+        for address in no_replacements:
+            console.print(f"  [blue]•[/blue] {address}")
 
     if successful:
         console.print(f"\n[green]✓ Successfully updated {len(successful)} supplier configuration(s)[/green]")
