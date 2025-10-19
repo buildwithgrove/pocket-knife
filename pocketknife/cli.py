@@ -18,10 +18,11 @@ console = Console()
 def main(ctx: typer.Context):
     """
     Pocketknife CLI: Syntactic sugar for poktroll operations.
-    
+
     Available commands:
     - delete-keys: Delete keys from keyring
-    - fetch-suppliers: Fetch supplier addresses  
+    - fetch-suppliers: Fetch supplier addresses
+    - generate-keys: Generate multiple keys with mnemonics
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
     - treasury-tools: Specific treasury operations
@@ -29,14 +30,15 @@ def main(ctx: typer.Context):
     if ctx.invoked_subcommand is None:
         console.print("[bold blue]Pocketknife CLI[/bold blue]")
         console.print("Syntactic sugar for poktroll operations.\n")
-        
+
         console.print("[bold]Available Commands:[/bold]")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
-        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances") 
+        console.print("  [cyan]generate-keys[/cyan]    Generate multiple keys with mnemonics")
+        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
-        
+
         console.print("\n[dim]Use 'pocketknife [COMMAND] --help' for more information about a command.[/dim]")
         ctx.exit(0)
 
@@ -264,6 +266,205 @@ def fetch_suppliers(
     except Exception as e:
         console.print(f"[red]Error writing to file:[/red] {e}")
         raise typer.Exit(1)
+
+
+@app.command()
+def generate_keys(
+    num_keys: int = typer.Argument(..., help="Number of keys to generate (positive integer)"),
+    key_prefix: str = typer.Argument(..., help="Prefix for key names (e.g., 'grove-app', 'node')"),
+    starting_index: int = typer.Argument(..., help="Starting index for key numbering (non-negative integer)"),
+    home_dir: Path = typer.Option(None, "--home", "-d", help="Set home directory for pocketd (default: ~/.poktroll)"),
+    output_file: Path = typer.Option(None, "--output", "-o", help="Set output file path (default: auto-generated)"),
+):
+    """
+    Generate multiple keys and save mnemonics to secrets file.
+
+    This command generates multiple keys using pocketd and saves their mnemonics
+    to a secrets file for backup and recovery purposes.
+
+    Arguments:
+    - num_keys: Number of keys to generate (positive integer)
+    - key_prefix: Prefix for key names (e.g., 'grove-app', 'node')
+    - starting_index: Starting index for key numbering (non-negative integer)
+
+    Options:
+    - --home, -d: Set home directory for pocketd (default: ~/.poktroll)
+    - --output, -o: Set output file path (default: auto-generated)
+
+    Examples:
+    - pocketknife generate-keys 10 grove-app 54
+    - pocketknife generate-keys 10 grove-app 54 --home /home/ft/.poktroll
+    - pocketknife generate-keys 5 node 0 -d ~/.poktroll -o my_keys.txt
+
+    Security Warning:
+    The output file contains sensitive mnemonic phrases.
+    Ensure proper file permissions: chmod 600 <output_file>
+    """
+    # Validate num_keys
+    if num_keys <= 0:
+        console.print("[red]Error: num_keys must be a positive integer[/red]")
+        raise typer.Exit(1)
+
+    # Validate starting_index
+    if starting_index < 0:
+        console.print("[red]Error: starting_index must be a non-negative integer[/red]")
+        raise typer.Exit(1)
+
+    # Set default home directory if not provided
+    if home_dir is None:
+        home_dir = Path.home() / ".poktroll"
+        console.print(f"[yellow]Using default home directory: {home_dir}[/yellow]")
+
+    # Validate home directory exists or can be created
+    if not home_dir.exists():
+        console.print(f"[yellow]Warning: Home directory '{home_dir}' does not exist[/yellow]")
+        console.print("[yellow]pocketd will attempt to create it if needed[/yellow]")
+
+    # Calculate ending index
+    ending_index = starting_index + num_keys - 1
+
+    # Set default output file if not provided
+    if output_file is None:
+        if starting_index == 0:
+            output_file = Path(f"secrets_{key_prefix}")
+        else:
+            output_file = Path(f"secrets_{key_prefix}_{starting_index}-{ending_index}")
+
+    # Check if pocketd command is available
+    if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Header
+    console.print("=" * 60)
+    console.print("[bold blue]  Pocket Shannon Key Generator[/bold blue]")
+    console.print("=" * 60)
+    console.print()
+
+    # Display configuration
+    console.print("[yellow]Configuration:[/yellow]")
+    console.print(f"[blue]  Number of keys: {num_keys}[/blue]")
+    console.print(f"[blue]  Key prefix: {key_prefix}[/blue]")
+    console.print(f"[blue]  Starting index: {starting_index}[/blue]")
+    console.print(f"[blue]  Ending index: {ending_index}[/blue]")
+    console.print(f"[blue]  Key range: {key_prefix}{starting_index} to {key_prefix}{ending_index}[/blue]")
+    console.print(f"[blue]  Home directory: {home_dir}[/blue]")
+    console.print(f"[blue]  Output file: {output_file}[/blue]")
+    console.print()
+
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Initialize the output file
+    try:
+        with output_file.open('w') as f:
+            f.write(f"# Pocket Shannon Keys\n")
+            f.write(f"# Generated on: {timestamp}\n")
+            f.write(f"# Number of keys: {num_keys}\n")
+            f.write(f"# Starting index: {starting_index}\n")
+            f.write(f"# Ending index: {ending_index}\n")
+            f.write(f"# Key prefix: {key_prefix}\n")
+            f.write(f"# Home directory: {home_dir}\n")
+            f.write(f"# Key range: {key_prefix}{starting_index} to {key_prefix}{ending_index}\n")
+            f.write("\n")
+    except Exception as e:
+        console.print(f"[red]Error creating output file:[/red] {e}")
+        raise typer.Exit(1)
+
+    console.print("[green]Starting key generation...[/green]")
+    console.print(f"[yellow]Output will be saved to: {output_file}[/yellow]")
+    console.print()
+
+    # Generate keys
+    success_count = 0
+    failed_count = 0
+
+    for i in range(num_keys):
+        current_index = starting_index + i
+        key_name = f"{key_prefix}{current_index}"
+
+        console.print(f"[blue]Generating key {i+1}/{num_keys}: {key_name} (index: {current_index})[/blue]")
+
+        # Run the pocketd command
+        cmd = ["pocketd", "keys", "add", key_name, "--home", str(home_dir)]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                # Extract information from output
+                output_lines = result.stdout.split('\n')
+                address = ""
+                name = ""
+                pubkey = ""
+                mnemonic = ""
+
+                for line in output_lines:
+                    if line.strip().startswith('- address:'):
+                        address = line.split('- address:')[1].strip()
+                    elif line.strip().startswith('name:'):
+                        name = line.split('name:')[1].strip()
+                    elif line.strip().startswith('pubkey:'):
+                        pubkey = line.split('pubkey:')[1].strip()
+
+                # Extract mnemonic (last non-empty line)
+                for line in reversed(output_lines):
+                    if line.strip() and not line.strip().startswith('-') and not line.strip().startswith('name:') and not line.strip().startswith('type:') and not line.strip().startswith('address:') and not line.strip().startswith('pubkey:'):
+                        mnemonic = line.strip()
+                        break
+
+                # Append to output file
+                with output_file.open('a') as f:
+                    f.write("=" * 60 + "\n")
+                    f.write(f"Key #{i+1}: {key_name} (Index: {current_index})\n")
+                    f.write("=" * 60 + "\n")
+                    f.write(f"Address: {address}\n")
+                    f.write(f"Name: {name}\n")
+                    f.write(f"Public Key: {pubkey}\n")
+                    f.write(f"Mnemonic: {mnemonic}\n")
+                    f.write("\n")
+
+                console.print(f"[green]✓ Key {key_name} generated successfully[/green]")
+                success_count += 1
+            else:
+                console.print(f"[red]✗ Failed to generate key {key_name}[/red]")
+                console.print(f"[red]Error output: {result.stderr}[/red]")
+
+                # Log the failure
+                with output_file.open('a') as f:
+                    f.write("=" * 60 + "\n")
+                    f.write(f"Key #{i+1}: {key_name} (Index: {current_index}) - FAILED\n")
+                    f.write("=" * 60 + "\n")
+                    f.write("Error: Failed to generate key\n")
+                    f.write(f"Error output: {result.stderr}\n")
+                    f.write("\n")
+
+                failed_count += 1
+
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]✗ Timeout generating key {key_name}[/red]")
+            failed_count += 1
+        except Exception as e:
+            console.print(f"[red]✗ Error generating key {key_name}: {e}[/red]")
+            failed_count += 1
+
+        console.print()
+
+    # Final summary
+    console.print("=" * 60)
+    console.print("[green]Key generation complete![/green]")
+    console.print(f"[blue]Generated keys: {key_prefix}{starting_index} to {key_prefix}{ending_index}[/blue]")
+    console.print(f"[blue]Successful: {success_count}/{num_keys}[/blue]")
+    if failed_count > 0:
+        console.print(f"[red]Failed: {failed_count}/{num_keys}[/red]")
+    console.print(f"[yellow]Results saved to: {output_file}[/yellow]")
+    console.print("[red]⚠️  IMPORTANT: Keep the {0} file secure![/red]".format(output_file))
+    console.print("[red]⚠️  It contains sensitive mnemonic phrases![/red]")
+    console.print("=" * 60)
+
+    # Show file permissions recommendation
+    console.print(f"[blue]Recommended: Set restrictive permissions on {output_file}[/blue]")
+    console.print(f"[blue]Run: chmod 600 {output_file}[/blue]")
 
 
 @app.command()
