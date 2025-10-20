@@ -20,9 +20,11 @@ def main(ctx: typer.Context):
     Pocketknife CLI: Syntactic sugar for poktroll operations.
     
     Available commands:
+    - add-services: Add or modify services from file
     - delete-keys: Delete keys from keyring
     - fetch-suppliers: Fetch supplier addresses
     - import-keys: Import keys from mnemonic file
+    - stake-apps: Stake applications (single or batch)
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
     - treasury-tools: Specific treasury operations
@@ -32,9 +34,11 @@ def main(ctx: typer.Context):
         console.print("Syntactic sugar for poktroll operations.\n")
 
         console.print("[bold]Available Commands:[/bold]")
+        console.print("  [cyan]add-services[/cyan]     Add or modify services from file")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
         console.print("  [cyan]import-keys[/cyan]      Import keys from mnemonic file")
+        console.print("  [cyan]stake-apps[/cyan]       Stake applications (single or batch)")
         console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
@@ -69,6 +73,231 @@ def treasury_main(ctx: typer.Context):
         
         console.print("\n[dim]Use 'pocketknife treasury-tools [SUBCOMMAND] --help' for more information.[/dim]")
         ctx.exit(0)
+
+@app.command()
+def add_services(
+    services_file: Path = typer.Argument(..., help="Path to services file (tab or space-separated)"),
+    network: str = typer.Argument(..., help="Network: 'main' or 'beta'"),
+    from_address: str = typer.Argument(..., help="Address/key name for --from flag"),
+    home_dir: Path = typer.Option(Path.home() / ".pocket", "--home", "-d", help="Home directory for pocketd"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
+    wait_time: int = typer.Option(5, "--wait", "-w", help="Seconds to wait between transactions"),
+):
+    """
+    Add or modify services on Pocket Network from a file.
+
+    This command reads a file with service definitions and executes
+    pocketd tx service add-service for each one.
+
+    Arguments:
+    - services_file: Path to file with services (tab or space-separated)
+    - network: Network to use ('main' or 'beta')
+    - from_address: Address/key name for --from flag
+
+    Options:
+    - --home, -d: Home directory for pocketd (default: ~/.pocket)
+    - --dry-run: Show commands without executing
+    - --wait, -w: Seconds to wait between transactions (default: 5)
+
+    File format (tab or space-separated):
+    service_id<TAB>service_description<TAB>CUTTM
+    OR
+    service_id service_description CUTTM
+
+    Example:
+    eth	Ethereum	1
+    bitcoin	Bitcoin	2
+    polygon "Polygon Network" 3
+
+    Examples:
+    - pocketknife add-services services.txt main my-key
+    - pocketknife add-services services.txt beta my-key --home ~/.poktroll
+    - pocketknife add-services services.txt main my-key --dry-run
+
+    IMPORTANT: Check current fees by running:
+    pocketd query service params --node <NODE_URL>
+    This command uses a default fee of 20000upokt.
+    """
+    import time
+    import re
+
+    # Validate network and set node URL and chain ID
+    network_config = {
+        "main": {
+            "node_url": "https://shannon-grove-rpc.mainnet.poktroll.com",
+            "chain_id": "pocket"
+        },
+        "beta": {
+            "node_url": "https://shannon-testnet-grove-rpc.beta.poktroll.com",
+            "chain_id": "pocket-beta"
+        }
+    }
+
+    if network not in network_config:
+        console.print(f"[red]Error: Invalid network '{network}'. Must be 'main' or 'beta'[/red]")
+        raise typer.Exit(1)
+
+    node_url = network_config[network]["node_url"]
+    chain_id = network_config[network]["chain_id"]
+
+    # Check if services file exists
+    if not services_file.exists():
+        console.print(f"[red]Error: Services file not found: {services_file}[/red]")
+        raise typer.Exit(1)
+
+    # Check if pocketd command is available
+    if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display configuration
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - Commands will be displayed but not executed[/yellow]\n")
+
+    console.print("[bold blue]Adding or modifying services on Pocket Network[/bold blue]")
+    console.print(f"[cyan]Services file:[/cyan] {services_file}")
+    console.print(f"[cyan]Network:[/cyan] {network}")
+    console.print(f"[cyan]Node:[/cyan] {node_url}")
+    console.print(f"[cyan]Chain ID:[/cyan] {chain_id}")
+    console.print(f"[cyan]Home:[/cyan] {home_dir}")
+    console.print(f"[cyan]From address:[/cyan] {from_address}")
+    console.print()
+
+    # Parse services file
+    services = []
+    try:
+        with services_file.open('r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+
+                # Try tab-separated first
+                parts = line.split('\t')
+                if len(parts) == 3:
+                    service_id, service_description, cuttm = parts
+                else:
+                    # Fall back to space-separated
+                    # Handle quoted strings
+                    parts = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+', line)
+                    if len(parts) >= 3:
+                        service_id = parts[0].strip('"')
+                        service_description = parts[1].strip('"')
+                        cuttm = parts[2].strip('"')
+                    else:
+                        console.print(f"[yellow]Warning: Skipping invalid line {line_num}: {line}[/yellow]")
+                        continue
+
+                services.append({
+                    'service_id': service_id,
+                    'service_description': service_description,
+                    'cuttm': cuttm
+                })
+
+    except Exception as e:
+        console.print(f"[red]Error reading services file:[/red] {e}")
+        raise typer.Exit(1)
+
+    if not services:
+        console.print("[red]No valid services found in file.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Found {len(services)} service(s) to process[/green]")
+    console.print()
+
+    # Process services
+    success_count = 0
+    error_count = 0
+
+    for i, service in enumerate(services, 1):
+        service_id = service['service_id']
+        service_description = service['service_description']
+        cuttm = service['cuttm']
+
+        # Build command
+        cmd = [
+            "pocketd", "tx", "service", "add-service",
+            service_id, service_description, cuttm,
+            "--node", node_url,
+            "--fees", "20000upokt",
+            "--from", from_address,
+            "--chain-id", chain_id,
+            "--home", str(home_dir),
+            "--unordered",
+            "--timeout-duration=60s",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[{i}] {' '.join(cmd)}")
+        else:
+            console.print(f"[{i}] Adding/modifying service: {service_id} ({service_description}) with CUTTM: {cuttm}")
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                # Check if successful (exit code 0 and no meaningful raw_log error)
+                if result.returncode == 0 and ('raw_log: ""' in result.stdout or 'raw_log' not in result.stdout):
+                    success_count += 1
+                    console.print("  [green]✅ Success[/green]")
+
+                    # Extract transaction hash
+                    tx_hash_match = re.search(r'txhash:\s*([A-Fa-f0-9]+)', result.stdout)
+                    if tx_hash_match:
+                        console.print(f"  [dim]Transaction hash: {tx_hash_match.group(1)}[/dim]")
+
+                else:
+                    error_count += 1
+                    console.print("  [red]❌ Failed[/red]")
+
+                    # Try to extract error details
+                    if 'raw_log' in result.stdout and 'raw_log: ""' not in result.stdout:
+                        raw_log_match = re.search(r'raw_log:\s*(.+?)(?:\n|$)', result.stdout)
+                        if raw_log_match:
+                            console.print(f"  [red]Error: {raw_log_match.group(1)}[/red]")
+                    elif result.returncode != 0:
+                        console.print(f"  [red]Exit code: {result.returncode}[/red]")
+                        if result.stderr:
+                            console.print(f"  [red]Error: {result.stderr[:200]}[/red]")
+
+            except subprocess.TimeoutExpired:
+                error_count += 1
+                console.print("  [red]❌ Timeout[/red]")
+            except Exception as e:
+                error_count += 1
+                console.print(f"  [red]❌ Error: {e}[/red]")
+
+            console.print()
+
+            # Wait between transactions (except for last one)
+            if i < len(services):
+                console.print(f"  Waiting {wait_time} seconds before next transaction...")
+                for sec in range(wait_time):
+                    progress = "=" * (sec + 1)
+                    console.print(f"\r  [{sec+1}/{wait_time}] {progress}", end="")
+                    time.sleep(1)
+                console.print(f"\r  [{wait_time}/{wait_time}] ✓ Ready for next transaction")
+                console.print()
+
+    # Summary
+    console.print("=" * 60)
+    console.print("[bold]Summary:[/bold]")
+    console.print(f"Total services processed: {len(services)}")
+    if not dry_run:
+        console.print(f"Successful operations: {success_count}")
+        console.print(f"Failed operations: {error_count}")
+    console.print("=" * 60)
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN completed. Use without --dry-run to execute.[/yellow]")
+    elif error_count > 0:
+        console.print("\n[red]Some services failed. Check output above for details.[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("\n[green]All services added/modified successfully![/green]")
+
 
 @app.command()
 def delete_keys(
@@ -208,6 +437,336 @@ def delete_keys(
         raise typer.Exit(1)
     else:
         console.print("\n[green]All keys have been deleted successfully![/green]")
+
+
+@app.command()
+def stake_apps(
+    ctx: typer.Context,
+    address: str = typer.Argument(None, help="Application address (single mode)"),
+    amount: int = typer.Argument(None, help="Amount to stake in upokt (single mode)"),
+    service_id: str = typer.Argument(None, help="Service ID (single mode)"),
+    batch_file: Path = typer.Option(None, "--file", "-f", help="Batch file (format: address service_id amount per line)"),
+    delegate: str = typer.Option(None, "--delegate", help="Gateway address to delegate to after staking"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
+    node: str = typer.Option(None, "--node", help="Custom RPC endpoint"),
+    home: Path = typer.Option(None, "--home", help="Home directory for pocketd"),
+    keyring_backend: str = typer.Option(None, "--keyring-backend", help="Keyring backend"),
+    chain_id: str = typer.Option("pocket", "--chain-id", help="Chain ID"),
+):
+    """
+    Stake applications on Pocket Network (single or batch mode).
+
+    SINGLE MODE:
+      pocketknife stake-apps <address> <amount> <service_id> [OPTIONS]
+
+    BATCH MODE:
+      pocketknife stake-apps --file <file> [OPTIONS]
+
+    Arguments (Single mode):
+    - address: Application address to stake from
+    - amount: Amount to stake (in upokt, without suffix)
+    - service_id: Service ID to stake for
+
+    Options:
+    - --file, -f: Batch file (format: address service_id amount per line)
+    - --delegate: Gateway address to delegate to after staking (60s delay)
+    - --dry-run: Show commands without executing
+    - --node: Custom RPC endpoint
+    - --home: Home directory for pocketd
+    - --keyring-backend: Keyring backend
+    - --chain-id: Chain ID (default: pocket)
+
+    Examples:
+    - pocketknife stake-apps pokt1abc... 1000000 anvil
+    - pocketknife stake-apps --file stakes.txt
+    - pocketknife stake-apps pokt1abc... 1000000 anvil --delegate pokt1gateway...
+    - pocketknife stake-apps --file stakes.txt --dry-run
+
+    Batch file format:
+    pokt1abc... anvil 1000000
+    pokt1def... ethereum 2000000
+
+    Notes:
+    - Amount is in upokt (will add 'upokt' suffix automatically)
+    - Stake fees: 200000upokt (automatic)
+    - Delegation fees: 20000upokt (automatic)
+    - 60s delay between stake and delegation
+    """
+    import time
+    import tempfile
+    import yaml
+
+    # Determine mode
+    if batch_file:
+        # Batch mode
+        if address or amount or service_id:
+            console.print("[red]Error: Cannot use positional arguments with --file[/red]")
+            raise typer.Exit(1)
+        mode = "batch"
+    else:
+        # Single mode
+        if not address or amount is None or not service_id:
+            console.print("[red]Error: Single mode requires address, amount, and service_id[/red]")
+            console.print("[yellow]Usage: pocketknife stake-apps <address> <amount> <service_id>[/yellow]")
+            console.print("[yellow]Or use --file for batch mode[/yellow]")
+            raise typer.Exit(1)
+        mode = "single"
+
+    # Check pocketd
+    if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display header
+    console.print("=" * 60)
+    if mode == "single":
+        console.print("[bold blue]Pocket Application Staking (Single)[/bold blue]")
+    else:
+        console.print("[bold blue]Pocket Application Staking (Batch)[/bold blue]")
+    console.print("=" * 60)
+    console.print()
+
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE[/yellow]\n")
+
+    # Display configuration
+    console.print("[yellow]Configuration:[/yellow]")
+    console.print(f"[blue]Mode: {mode.title()}[/blue]")
+    if mode == "batch":
+        console.print(f"[blue]File: {batch_file}[/blue]")
+    else:
+        console.print(f"[blue]Address: {address}[/blue]")
+        console.print(f"[blue]Amount: {amount}upokt[/blue]")
+        console.print(f"[blue]Service ID: {service_id}[/blue]")
+    if home:
+        console.print(f"[blue]Home: {home}[/blue]")
+    if keyring_backend:
+        console.print(f"[blue]Keyring backend: {keyring_backend}[/blue]")
+    console.print(f"[blue]Chain ID: {chain_id}[/blue]")
+    if node:
+        console.print(f"[blue]Node: {node}[/blue]")
+    if delegate:
+        console.print(f"[blue]Delegate to: {delegate}[/blue]")
+    console.print()
+
+    def build_flags():
+        """Build common pocketd flags"""
+        flags = ["--chain-id", chain_id]
+        if node:
+            flags.extend(["--node", node])
+        if home:
+            flags.extend(["--home", str(home)])
+        if keyring_backend:
+            flags.extend(["--keyring-backend", keyring_backend])
+        return flags
+
+    def stake_application(from_addr, stake_amount, stake_service_id):
+        """Stake a single application"""
+        console.print(f"[blue]🚀 Staking application for {from_addr}...[/blue]")
+        console.print(f"[yellow]   Amount: {stake_amount}upokt[/yellow]")
+        console.print(f"[yellow]   Service ID: {stake_service_id}[/yellow]")
+
+        # Create YAML config
+        config_data = {
+            'stake_amount': f"{stake_amount}upokt",
+            'service_ids': [stake_service_id]
+        }
+
+        if dry_run:
+            console.print("[yellow]🔍 [DRY RUN] Would create config:[/yellow]")
+            console.print(f"[dim]{yaml.dump(config_data, default_flow_style=False)}[/dim]")
+        else:
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+                yaml.dump(config_data, f)
+                config_file = f.name
+            console.print(f"[green]✅ Created config: {config_file}[/green]")
+
+        # Build stake command
+        cmd = [
+            "pocketd", "tx", "application", "stake-application",
+            f"--config={config_file if not dry_run else '/tmp/stake_app_config.yaml'}",
+            f"--from={from_addr}",
+            *build_flags(),
+            "--fees=200000upokt",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[yellow]🔍 [DRY RUN] Would execute:[/yellow]")
+            console.print(f"[dim]{' '.join(cmd)}[/dim]")
+            console.print(f"[green]✅ [DRY RUN] Would successfully stake[/green]")
+            return True
+
+        console.print(f"[blue]🔨 Executing stake command...[/blue]")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                console.print(f"[green]✅ Successfully staked application for {from_addr}[/green]")
+                return True
+            else:
+                console.print(f"[red]❌ Failed to stake application for {from_addr}[/red]")
+                if result.stderr:
+                    console.print(f"[red]Error: {result.stderr[:200]}[/red]")
+                return False
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]❌ Timeout staking {from_addr}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            return False
+        finally:
+            if not dry_run:
+                try:
+                    import os
+                    os.unlink(config_file)
+                except:
+                    pass
+
+    def delegate_to_gateway(from_addr, gateway_addr, skip_wait=False):
+        """Delegate to gateway"""
+        if not skip_wait:
+            if dry_run:
+                console.print("[yellow]🔍 [DRY RUN] Would wait 60 seconds...[/yellow]")
+            else:
+                console.print("[blue]⏳ Waiting 60 seconds before delegation...[/blue]")
+                time.sleep(60)
+
+        console.print(f"[blue]🔗 Delegating {from_addr} to gateway {gateway_addr}...[/blue]")
+
+        cmd = [
+            "pocketd", "tx", "application", "delegate-to-gateway",
+            gateway_addr,
+            f"--from={from_addr}",
+            *build_flags(),
+            "--fees=20000upokt",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[yellow]🔍 [DRY RUN] Would execute:[/yellow]")
+            console.print(f"[dim]{' '.join(cmd)}[/dim]")
+            console.print(f"[green]✅ [DRY RUN] Would successfully delegate[/green]")
+            return True
+
+        console.print(f"[blue]🔨 Executing delegate command...[/blue]")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                console.print(f"[green]✅ Successfully delegated {from_addr} to gateway[/green]")
+                return True
+            else:
+                console.print(f"[red]❌ Failed to delegate {from_addr}[/red]")
+                if result.stderr:
+                    console.print(f"[red]Error: {result.stderr[:200]}[/red]")
+                return False
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]❌ Timeout delegating {from_addr}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            return False
+
+    if mode == "single":
+        # Single stake
+        success = stake_application(address, amount, service_id)
+
+        if success and delegate:
+            delegate_to_gateway(address, delegate)
+
+        console.print()
+        if success:
+            console.print("[green]🎉 Single stake operation completed![/green]")
+        else:
+            console.print("[red]💥 Single stake operation failed![/red]")
+            raise typer.Exit(1)
+
+    else:
+        # Batch mode
+        if not batch_file.exists():
+            console.print(f"[red]Error: File not found: {batch_file}[/red]")
+            raise typer.Exit(1)
+
+        # Parse file
+        stakes = []
+        with batch_file.open('r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                parts = line.split()
+                if len(parts) != 3:
+                    console.print(f"[yellow]Warning: Skipping invalid line {line_num}: {line}[/yellow]")
+                    continue
+
+                stakes.append({
+                    'address': parts[0],
+                    'service_id': parts[1],
+                    'amount': parts[2]
+                })
+
+        if not stakes:
+            console.print("[red]No valid stakes found in file[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]Found {len(stakes)} stake(s) to process[/green]")
+        console.print()
+
+        # Phase 1: Staking
+        console.print("[blue]🚀 PHASE 1: STAKING APPLICATIONS[/blue]")
+        console.print("[blue]================================[/blue]")
+        console.print()
+
+        successful_stakes = []
+        failed_stakes = 0
+
+        for i, stake in enumerate(stakes, 1):
+            console.print(f"[blue]Processing {i}/{len(stakes)}...[/blue]")
+            if stake_application(stake['address'], stake['amount'], stake['service_id']):
+                successful_stakes.append(stake['address'])
+            else:
+                failed_stakes += 1
+            console.print()
+
+        # Phase 2: Delegation
+        if delegate and successful_stakes:
+            console.print()
+            console.print("[blue]🔗 PHASE 2: DELEGATING TO GATEWAY[/blue]")
+            console.print("[blue]=================================[/blue]")
+            console.print()
+
+            console.print(f"[yellow]Will delegate {len(successful_stakes)} addresses to: {delegate}[/yellow]")
+
+            if dry_run:
+                console.print("[yellow]🔍 [DRY RUN] Would wait 60 seconds...[/yellow]")
+            else:
+                console.print("[blue]⏳ Waiting 60 seconds before delegations...[/blue]")
+                time.sleep(60)
+
+            console.print()
+
+            successful_delegations = 0
+            failed_delegations = 0
+
+            for addr in successful_stakes:
+                if delegate_to_gateway(addr, delegate, skip_wait=True):
+                    successful_delegations += 1
+                else:
+                    failed_delegations += 1
+                console.print()
+
+        # Summary
+        console.print("=" * 60)
+        console.print("[bold]📊 BATCH PROCESSING REPORT[/bold]")
+        console.print("=" * 60)
+        console.print(f"Total lines processed: {len(stakes)}")
+        console.print(f"[green]Successful stakes: {len(successful_stakes)}[/green]")
+        console.print(f"[red]Failed stakes: {failed_stakes}[/red]")
+        if delegate:
+            console.print(f"[green]Successful delegations: {successful_delegations}[/green]")
+            console.print(f"[red]Failed delegations: {failed_delegations}[/red]")
+        console.print("=" * 60)
 
 
 @app.command()

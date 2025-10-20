@@ -15,9 +15,11 @@
 
 | Command | Description | Key Features |
 |---------|-------------|--------------|
+| **add-services** | Add or modify services from file | • Batch service operations<br>• Supports both main and beta networks<br>• Configurable wait time between transactions<br>• Dry-run mode for testing |
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
 | **import-keys** | Import keys from mnemonic file | • Parses secrets file format<br>• Batch import with progress tracking<br>• Detects existing keys<br>• Security reminders |
+| **stake-apps** | Stake applications (single or batch mode) | • Single and batch staking modes<br>• Optional gateway delegation with 60s delay<br>• YAML config file generation<br>• Dry-run support |
 | **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake, delegator stake types<br>• Separates delegator rewards into dedicated section<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **treasury-tools** | Individual balance type analysis | • All subcommands now support both text files and JSON files<br>• JSON files automatically extract from appropriate arrays<br>• Perfect for focused analysis of specific address types<br>• Backward compatible with existing text files |
 | **unstake** | Batch unstake multiple operator addresses | • Processes address list from file<br>• Handles gas estimation automatically<br>• Reports success/failure per transaction |
@@ -107,6 +109,51 @@ make install
    ```
 
 ## Usage
+
+### Adding or Modifying Services
+
+> Batch add or modify services on Pocket Network from a file
+
+**Use case:** Perfect for managing multiple blockchain services on Pocket Network
+
+```bash
+# Add services from file on mainnet
+pocketknife add-services services.txt main my-key
+
+# Add services on testnet (beta)
+pocketknife add-services services.txt beta my-key
+
+# Use custom home directory
+pocketknife add-services services.txt main my-key --home ~/.poktroll
+
+# Dry run to see commands without executing
+pocketknife add-services services.txt main my-key --dry-run
+
+# Custom wait time between transactions (default: 5 seconds)
+pocketknife add-services services.txt main my-key --wait 10
+```
+
+**Services file format** (tab or space-separated):
+```
+# Comment lines start with #
+eth	Ethereum	1
+bitcoin	Bitcoin	2
+polygon	"Polygon Network"	3
+```
+
+**Features:**
+- **Batch processing** - Add multiple services in one command
+- **Network support** - Works with both main and beta networks
+- **Progress tracking** - Real-time status for each service
+- **Error handling** - Continues on failure, reports at end
+- **Dry-run mode** - Preview commands before executing
+- **Wait time** - Configurable delay between transactions
+
+**IMPORTANT:** Check current fees by running:
+```bash
+pocketd query service params --node <NODE_URL>
+```
+This command uses a default fee of 20000upokt which may need adjustment.
 
 ### Deleting Keys from Keyring
 
@@ -218,9 +265,66 @@ Successfully saved 670 operator addresses!
 
 **Features:**
 - **Smart filtering** from 6,000+ total suppliers
-- **Real-time progress** with live address display  
+- **Real-time progress** with live address display
 - **Auto-sorting** and deduplication
 - **File management** with directory creation
+
+### Staking Applications
+
+> Stake applications on Pocket Network (single or batch mode) with optional gateway delegation
+
+**Use case:** Perfect for staking new applications or batch staking multiple apps at once
+
+#### Single Mode
+
+```bash
+# Stake a single application
+pocketknife stake-apps pokt1abc... 1000000 anvil
+
+# Stake and delegate to a gateway (60s delay between operations)
+pocketknife stake-apps pokt1abc... 1000000 anvil --delegate pokt1gateway...
+
+# Preview the commands without executing
+pocketknife stake-apps pokt1abc... 1000000 anvil --dry-run
+```
+
+#### Batch Mode
+
+1. **Create batch file**
+   ```txt
+   pokt1abc... anvil 1000000
+   pokt1def... ethereum 2000000
+   pokt1ghi... optimism 1500000
+   ```
+
+   > **Format:** Each line contains: `address service_id amount` (separated by spaces)
+
+2. **Execute batch staking**
+   ```bash
+   # Stake multiple applications
+   pocketknife stake-apps --file stakes.txt
+
+   # Batch stake with delegation to gateway
+   pocketknife stake-apps --file stakes.txt --delegate pokt1gateway...
+
+   # Preview batch operations
+   pocketknife stake-apps --file stakes.txt --dry-run
+   ```
+
+**Features:**
+- **Dual mode:** Single stake or batch processing
+- **YAML config:** Auto-generates pocketd configuration files
+- **Gateway delegation:** Optional delegation with 60-second delay
+- **Automatic fees:** 200000upokt for staking, 20000upokt for delegation
+- **Progress tracking:** Real-time status for batch operations
+- **Dry-run mode:** Preview all commands before execution
+
+**Technical Details:**
+- Amount is in `upokt` (automatically adds suffix)
+- Stake fees: `200000upokt` (automatic)
+- Delegation fees: `20000upokt` (automatic)
+- 60-second delay between stake and delegation operations
+- Uses temporary YAML config files for pocketd
 
 ### Treasury Balance Operations
 
