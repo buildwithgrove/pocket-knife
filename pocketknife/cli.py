@@ -21,7 +21,8 @@ def main(ctx: typer.Context):
     
     Available commands:
     - delete-keys: Delete keys from keyring
-    - fetch-suppliers: Fetch supplier addresses  
+    - fetch-suppliers: Fetch supplier addresses
+    - stake-apps: Stake applications (single or batch)
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
     - treasury-tools: Specific treasury operations
@@ -29,11 +30,12 @@ def main(ctx: typer.Context):
     if ctx.invoked_subcommand is None:
         console.print("[bold blue]Pocketknife CLI[/bold blue]")
         console.print("Syntactic sugar for poktroll operations.\n")
-        
+
         console.print("[bold]Available Commands:[/bold]")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
-        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances") 
+        console.print("  [cyan]stake-apps[/cyan]       Stake applications (single or batch)")
+        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
         
@@ -206,6 +208,336 @@ def delete_keys(
         raise typer.Exit(1)
     else:
         console.print("\n[green]All keys have been deleted successfully![/green]")
+
+
+@app.command()
+def stake_apps(
+    ctx: typer.Context,
+    address: str = typer.Argument(None, help="Application address (single mode)"),
+    amount: int = typer.Argument(None, help="Amount to stake in upokt (single mode)"),
+    service_id: str = typer.Argument(None, help="Service ID (single mode)"),
+    batch_file: Path = typer.Option(None, "--file", "-f", help="Batch file (format: address service_id amount per line)"),
+    delegate: str = typer.Option(None, "--delegate", help="Gateway address to delegate to after staking"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
+    node: str = typer.Option(None, "--node", help="Custom RPC endpoint"),
+    home: Path = typer.Option(None, "--home", help="Home directory for pocketd"),
+    keyring_backend: str = typer.Option(None, "--keyring-backend", help="Keyring backend"),
+    chain_id: str = typer.Option("pocket", "--chain-id", help="Chain ID"),
+):
+    """
+    Stake applications on Pocket Network (single or batch mode).
+
+    SINGLE MODE:
+      pocketknife stake-apps <address> <amount> <service_id> [OPTIONS]
+
+    BATCH MODE:
+      pocketknife stake-apps --file <file> [OPTIONS]
+
+    Arguments (Single mode):
+    - address: Application address to stake from
+    - amount: Amount to stake (in upokt, without suffix)
+    - service_id: Service ID to stake for
+
+    Options:
+    - --file, -f: Batch file (format: address service_id amount per line)
+    - --delegate: Gateway address to delegate to after staking (60s delay)
+    - --dry-run: Show commands without executing
+    - --node: Custom RPC endpoint
+    - --home: Home directory for pocketd
+    - --keyring-backend: Keyring backend
+    - --chain-id: Chain ID (default: pocket)
+
+    Examples:
+    - pocketknife stake-apps pokt1abc... 1000000 anvil
+    - pocketknife stake-apps --file stakes.txt
+    - pocketknife stake-apps pokt1abc... 1000000 anvil --delegate pokt1gateway...
+    - pocketknife stake-apps --file stakes.txt --dry-run
+
+    Batch file format:
+    pokt1abc... anvil 1000000
+    pokt1def... ethereum 2000000
+
+    Notes:
+    - Amount is in upokt (will add 'upokt' suffix automatically)
+    - Stake fees: 200000upokt (automatic)
+    - Delegation fees: 20000upokt (automatic)
+    - 60s delay between stake and delegation
+    """
+    import time
+    import tempfile
+    import yaml
+
+    # Determine mode
+    if batch_file:
+        # Batch mode
+        if address or amount or service_id:
+            console.print("[red]Error: Cannot use positional arguments with --file[/red]")
+            raise typer.Exit(1)
+        mode = "batch"
+    else:
+        # Single mode
+        if not address or amount is None or not service_id:
+            console.print("[red]Error: Single mode requires address, amount, and service_id[/red]")
+            console.print("[yellow]Usage: pocketknife stake-apps <address> <amount> <service_id>[/yellow]")
+            console.print("[yellow]Or use --file for batch mode[/yellow]")
+            raise typer.Exit(1)
+        mode = "single"
+
+    # Check pocketd
+    if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display header
+    console.print("=" * 60)
+    if mode == "single":
+        console.print("[bold blue]Pocket Application Staking (Single)[/bold blue]")
+    else:
+        console.print("[bold blue]Pocket Application Staking (Batch)[/bold blue]")
+    console.print("=" * 60)
+    console.print()
+
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE[/yellow]\n")
+
+    # Display configuration
+    console.print("[yellow]Configuration:[/yellow]")
+    console.print(f"[blue]Mode: {mode.title()}[/blue]")
+    if mode == "batch":
+        console.print(f"[blue]File: {batch_file}[/blue]")
+    else:
+        console.print(f"[blue]Address: {address}[/blue]")
+        console.print(f"[blue]Amount: {amount}upokt[/blue]")
+        console.print(f"[blue]Service ID: {service_id}[/blue]")
+    if home:
+        console.print(f"[blue]Home: {home}[/blue]")
+    if keyring_backend:
+        console.print(f"[blue]Keyring backend: {keyring_backend}[/blue]")
+    console.print(f"[blue]Chain ID: {chain_id}[/blue]")
+    if node:
+        console.print(f"[blue]Node: {node}[/blue]")
+    if delegate:
+        console.print(f"[blue]Delegate to: {delegate}[/blue]")
+    console.print()
+
+    def build_flags():
+        """Build common pocketd flags"""
+        flags = ["--chain-id", chain_id]
+        if node:
+            flags.extend(["--node", node])
+        if home:
+            flags.extend(["--home", str(home)])
+        if keyring_backend:
+            flags.extend(["--keyring-backend", keyring_backend])
+        return flags
+
+    def stake_application(from_addr, stake_amount, stake_service_id):
+        """Stake a single application"""
+        console.print(f"[blue]🚀 Staking application for {from_addr}...[/blue]")
+        console.print(f"[yellow]   Amount: {stake_amount}upokt[/yellow]")
+        console.print(f"[yellow]   Service ID: {stake_service_id}[/yellow]")
+
+        # Create YAML config
+        config_data = {
+            'stake_amount': f"{stake_amount}upokt",
+            'service_ids': [stake_service_id]
+        }
+
+        if dry_run:
+            console.print("[yellow]🔍 [DRY RUN] Would create config:[/yellow]")
+            console.print(f"[dim]{yaml.dump(config_data, default_flow_style=False)}[/dim]")
+        else:
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+                yaml.dump(config_data, f)
+                config_file = f.name
+            console.print(f"[green]✅ Created config: {config_file}[/green]")
+
+        # Build stake command
+        cmd = [
+            "pocketd", "tx", "application", "stake-application",
+            f"--config={config_file if not dry_run else '/tmp/stake_app_config.yaml'}",
+            f"--from={from_addr}",
+            *build_flags(),
+            "--fees=200000upokt",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[yellow]🔍 [DRY RUN] Would execute:[/yellow]")
+            console.print(f"[dim]{' '.join(cmd)}[/dim]")
+            console.print(f"[green]✅ [DRY RUN] Would successfully stake[/green]")
+            return True
+
+        console.print(f"[blue]🔨 Executing stake command...[/blue]")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                console.print(f"[green]✅ Successfully staked application for {from_addr}[/green]")
+                return True
+            else:
+                console.print(f"[red]❌ Failed to stake application for {from_addr}[/red]")
+                if result.stderr:
+                    console.print(f"[red]Error: {result.stderr[:200]}[/red]")
+                return False
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]❌ Timeout staking {from_addr}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            return False
+        finally:
+            if not dry_run:
+                try:
+                    import os
+                    os.unlink(config_file)
+                except:
+                    pass
+
+    def delegate_to_gateway(from_addr, gateway_addr, skip_wait=False):
+        """Delegate to gateway"""
+        if not skip_wait:
+            if dry_run:
+                console.print("[yellow]🔍 [DRY RUN] Would wait 60 seconds...[/yellow]")
+            else:
+                console.print("[blue]⏳ Waiting 60 seconds before delegation...[/blue]")
+                time.sleep(60)
+
+        console.print(f"[blue]🔗 Delegating {from_addr} to gateway {gateway_addr}...[/blue]")
+
+        cmd = [
+            "pocketd", "tx", "application", "delegate-to-gateway",
+            gateway_addr,
+            f"--from={from_addr}",
+            *build_flags(),
+            "--fees=20000upokt",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[yellow]🔍 [DRY RUN] Would execute:[/yellow]")
+            console.print(f"[dim]{' '.join(cmd)}[/dim]")
+            console.print(f"[green]✅ [DRY RUN] Would successfully delegate[/green]")
+            return True
+
+        console.print(f"[blue]🔨 Executing delegate command...[/blue]")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0:
+                console.print(f"[green]✅ Successfully delegated {from_addr} to gateway[/green]")
+                return True
+            else:
+                console.print(f"[red]❌ Failed to delegate {from_addr}[/red]")
+                if result.stderr:
+                    console.print(f"[red]Error: {result.stderr[:200]}[/red]")
+                return False
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]❌ Timeout delegating {from_addr}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Error: {e}[/red]")
+            return False
+
+    if mode == "single":
+        # Single stake
+        success = stake_application(address, amount, service_id)
+
+        if success and delegate:
+            delegate_to_gateway(address, delegate)
+
+        console.print()
+        if success:
+            console.print("[green]🎉 Single stake operation completed![/green]")
+        else:
+            console.print("[red]💥 Single stake operation failed![/red]")
+            raise typer.Exit(1)
+
+    else:
+        # Batch mode
+        if not batch_file.exists():
+            console.print(f"[red]Error: File not found: {batch_file}[/red]")
+            raise typer.Exit(1)
+
+        # Parse file
+        stakes = []
+        with batch_file.open('r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                parts = line.split()
+                if len(parts) != 3:
+                    console.print(f"[yellow]Warning: Skipping invalid line {line_num}: {line}[/yellow]")
+                    continue
+
+                stakes.append({
+                    'address': parts[0],
+                    'service_id': parts[1],
+                    'amount': parts[2]
+                })
+
+        if not stakes:
+            console.print("[red]No valid stakes found in file[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]Found {len(stakes)} stake(s) to process[/green]")
+        console.print()
+
+        # Phase 1: Staking
+        console.print("[blue]🚀 PHASE 1: STAKING APPLICATIONS[/blue]")
+        console.print("[blue]================================[/blue]")
+        console.print()
+
+        successful_stakes = []
+        failed_stakes = 0
+
+        for i, stake in enumerate(stakes, 1):
+            console.print(f"[blue]Processing {i}/{len(stakes)}...[/blue]")
+            if stake_application(stake['address'], stake['amount'], stake['service_id']):
+                successful_stakes.append(stake['address'])
+            else:
+                failed_stakes += 1
+            console.print()
+
+        # Phase 2: Delegation
+        if delegate and successful_stakes:
+            console.print()
+            console.print("[blue]🔗 PHASE 2: DELEGATING TO GATEWAY[/blue]")
+            console.print("[blue]=================================[/blue]")
+            console.print()
+
+            console.print(f"[yellow]Will delegate {len(successful_stakes)} addresses to: {delegate}[/yellow]")
+
+            if dry_run:
+                console.print("[yellow]🔍 [DRY RUN] Would wait 60 seconds...[/yellow]")
+            else:
+                console.print("[blue]⏳ Waiting 60 seconds before delegations...[/blue]")
+                time.sleep(60)
+
+            console.print()
+
+            successful_delegations = 0
+            failed_delegations = 0
+
+            for addr in successful_stakes:
+                if delegate_to_gateway(addr, delegate, skip_wait=True):
+                    successful_delegations += 1
+                else:
+                    failed_delegations += 1
+                console.print()
+
+        # Summary
+        console.print("=" * 60)
+        console.print("[bold]📊 BATCH PROCESSING REPORT[/bold]")
+        console.print("=" * 60)
+        console.print(f"Total lines processed: {len(stakes)}")
+        console.print(f"[green]Successful stakes: {len(successful_stakes)}[/green]")
+        console.print(f"[red]Failed stakes: {failed_stakes}[/red]")
+        if delegate:
+            console.print(f"[green]Successful delegations: {successful_delegations}[/green]")
+            console.print(f"[red]Failed delegations: {failed_delegations}[/red]")
+        console.print("=" * 60)
 
 
 @app.command()
