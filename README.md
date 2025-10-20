@@ -15,6 +15,7 @@
 
 | Command | Description | Key Features |
 |---------|-------------|--------------|
+| **add-services** | Add or modify services from file | • Batch service operations<br>• Supports both main and beta networks<br>• Configurable wait time between transactions<br>• Dry-run mode for testing |
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
 | **stake-apps** | Stake applications (single or batch mode) | • Single and batch staking modes<br>• Optional gateway delegation with 60s delay<br>• YAML config file generation<br>• Dry-run support |
@@ -107,6 +108,51 @@ make install
    ```
 
 ## Usage
+
+### Adding or Modifying Services
+
+> Batch add or modify services on Pocket Network from a file
+
+**Use case:** Perfect for managing multiple blockchain services on Pocket Network
+
+```bash
+# Add services from file on mainnet
+pocketknife add-services services.txt main my-key
+
+# Add services on testnet (beta)
+pocketknife add-services services.txt beta my-key
+
+# Use custom home directory
+pocketknife add-services services.txt main my-key --home ~/.poktroll
+
+# Dry run to see commands without executing
+pocketknife add-services services.txt main my-key --dry-run
+
+# Custom wait time between transactions (default: 5 seconds)
+pocketknife add-services services.txt main my-key --wait 10
+```
+
+**Services file format** (tab or space-separated):
+```
+# Comment lines start with #
+eth	Ethereum	1
+bitcoin	Bitcoin	2
+polygon	"Polygon Network"	3
+```
+
+**Features:**
+- **Batch processing** - Add multiple services in one command
+- **Network support** - Works with both main and beta networks
+- **Progress tracking** - Real-time status for each service
+- **Error handling** - Continues on failure, reports at end
+- **Dry-run mode** - Preview commands before executing
+- **Wait time** - Configurable delay between transactions
+
+**IMPORTANT:** Check current fees by running:
+```bash
+pocketd query service params --node <NODE_URL>
+```
+This command uses a default fee of 20000upokt which may need adjustment.
 
 ### Deleting Keys from Keyring
 
