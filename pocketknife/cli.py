@@ -20,8 +20,9 @@ def main(ctx: typer.Context):
     Pocketknife CLI: Syntactic sugar for poktroll operations.
     
     Available commands:
+    - add-services: Add or modify services from file
     - delete-keys: Delete keys from keyring
-    - fetch-suppliers: Fetch supplier addresses  
+    - fetch-suppliers: Fetch supplier addresses
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
     - treasury-tools: Specific treasury operations
@@ -29,11 +30,12 @@ def main(ctx: typer.Context):
     if ctx.invoked_subcommand is None:
         console.print("[bold blue]Pocketknife CLI[/bold blue]")
         console.print("Syntactic sugar for poktroll operations.\n")
-        
+
         console.print("[bold]Available Commands:[/bold]")
+        console.print("  [cyan]add-services[/cyan]     Add or modify services from file")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
-        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances") 
+        console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
         
@@ -67,6 +69,231 @@ def treasury_main(ctx: typer.Context):
         
         console.print("\n[dim]Use 'pocketknife treasury-tools [SUBCOMMAND] --help' for more information.[/dim]")
         ctx.exit(0)
+
+@app.command()
+def add_services(
+    services_file: Path = typer.Argument(..., help="Path to services file (tab or space-separated)"),
+    network: str = typer.Argument(..., help="Network: 'main' or 'beta'"),
+    from_address: str = typer.Argument(..., help="Address/key name for --from flag"),
+    home_dir: Path = typer.Option(Path.home() / ".pocket", "--home", "-d", help="Home directory for pocketd"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
+    wait_time: int = typer.Option(5, "--wait", "-w", help="Seconds to wait between transactions"),
+):
+    """
+    Add or modify services on Pocket Network from a file.
+
+    This command reads a file with service definitions and executes
+    pocketd tx service add-service for each one.
+
+    Arguments:
+    - services_file: Path to file with services (tab or space-separated)
+    - network: Network to use ('main' or 'beta')
+    - from_address: Address/key name for --from flag
+
+    Options:
+    - --home, -d: Home directory for pocketd (default: ~/.pocket)
+    - --dry-run: Show commands without executing
+    - --wait, -w: Seconds to wait between transactions (default: 5)
+
+    File format (tab or space-separated):
+    service_id<TAB>service_description<TAB>CUTTM
+    OR
+    service_id service_description CUTTM
+
+    Example:
+    eth	Ethereum	1
+    bitcoin	Bitcoin	2
+    polygon "Polygon Network" 3
+
+    Examples:
+    - pocketknife add-services services.txt main my-key
+    - pocketknife add-services services.txt beta my-key --home ~/.poktroll
+    - pocketknife add-services services.txt main my-key --dry-run
+
+    IMPORTANT: Check current fees by running:
+    pocketd query service params --node <NODE_URL>
+    This command uses a default fee of 20000upokt.
+    """
+    import time
+    import re
+
+    # Validate network and set node URL and chain ID
+    network_config = {
+        "main": {
+            "node_url": "https://shannon-grove-rpc.mainnet.poktroll.com",
+            "chain_id": "pocket"
+        },
+        "beta": {
+            "node_url": "https://shannon-testnet-grove-rpc.beta.poktroll.com",
+            "chain_id": "pocket-beta"
+        }
+    }
+
+    if network not in network_config:
+        console.print(f"[red]Error: Invalid network '{network}'. Must be 'main' or 'beta'[/red]")
+        raise typer.Exit(1)
+
+    node_url = network_config[network]["node_url"]
+    chain_id = network_config[network]["chain_id"]
+
+    # Check if services file exists
+    if not services_file.exists():
+        console.print(f"[red]Error: Services file not found: {services_file}[/red]")
+        raise typer.Exit(1)
+
+    # Check if pocketd command is available
+    if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
+        console.print("[red]Error: pocketd command not found.[/red]")
+        raise typer.Exit(1)
+
+    # Display configuration
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - Commands will be displayed but not executed[/yellow]\n")
+
+    console.print("[bold blue]Adding or modifying services on Pocket Network[/bold blue]")
+    console.print(f"[cyan]Services file:[/cyan] {services_file}")
+    console.print(f"[cyan]Network:[/cyan] {network}")
+    console.print(f"[cyan]Node:[/cyan] {node_url}")
+    console.print(f"[cyan]Chain ID:[/cyan] {chain_id}")
+    console.print(f"[cyan]Home:[/cyan] {home_dir}")
+    console.print(f"[cyan]From address:[/cyan] {from_address}")
+    console.print()
+
+    # Parse services file
+    services = []
+    try:
+        with services_file.open('r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+
+                # Skip empty lines and comments
+                if not line or line.startswith('#'):
+                    continue
+
+                # Try tab-separated first
+                parts = line.split('\t')
+                if len(parts) == 3:
+                    service_id, service_description, cuttm = parts
+                else:
+                    # Fall back to space-separated
+                    # Handle quoted strings
+                    parts = re.findall(r'(?:[^\s"]|"(?:\\.|[^"])*")+', line)
+                    if len(parts) >= 3:
+                        service_id = parts[0].strip('"')
+                        service_description = parts[1].strip('"')
+                        cuttm = parts[2].strip('"')
+                    else:
+                        console.print(f"[yellow]Warning: Skipping invalid line {line_num}: {line}[/yellow]")
+                        continue
+
+                services.append({
+                    'service_id': service_id,
+                    'service_description': service_description,
+                    'cuttm': cuttm
+                })
+
+    except Exception as e:
+        console.print(f"[red]Error reading services file:[/red] {e}")
+        raise typer.Exit(1)
+
+    if not services:
+        console.print("[red]No valid services found in file.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Found {len(services)} service(s) to process[/green]")
+    console.print()
+
+    # Process services
+    success_count = 0
+    error_count = 0
+
+    for i, service in enumerate(services, 1):
+        service_id = service['service_id']
+        service_description = service['service_description']
+        cuttm = service['cuttm']
+
+        # Build command
+        cmd = [
+            "pocketd", "tx", "service", "add-service",
+            service_id, service_description, cuttm,
+            "--node", node_url,
+            "--fees", "20000upokt",
+            "--from", from_address,
+            "--chain-id", chain_id,
+            "--home", str(home_dir),
+            "--unordered",
+            "--timeout-duration=60s",
+            "--yes"
+        ]
+
+        if dry_run:
+            console.print(f"[{i}] {' '.join(cmd)}")
+        else:
+            console.print(f"[{i}] Adding/modifying service: {service_id} ({service_description}) with CUTTM: {cuttm}")
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+                # Check if successful (exit code 0 and no meaningful raw_log error)
+                if result.returncode == 0 and ('raw_log: ""' in result.stdout or 'raw_log' not in result.stdout):
+                    success_count += 1
+                    console.print("  [green]✅ Success[/green]")
+
+                    # Extract transaction hash
+                    tx_hash_match = re.search(r'txhash:\s*([A-Fa-f0-9]+)', result.stdout)
+                    if tx_hash_match:
+                        console.print(f"  [dim]Transaction hash: {tx_hash_match.group(1)}[/dim]")
+
+                else:
+                    error_count += 1
+                    console.print("  [red]❌ Failed[/red]")
+
+                    # Try to extract error details
+                    if 'raw_log' in result.stdout and 'raw_log: ""' not in result.stdout:
+                        raw_log_match = re.search(r'raw_log:\s*(.+?)(?:\n|$)', result.stdout)
+                        if raw_log_match:
+                            console.print(f"  [red]Error: {raw_log_match.group(1)}[/red]")
+                    elif result.returncode != 0:
+                        console.print(f"  [red]Exit code: {result.returncode}[/red]")
+                        if result.stderr:
+                            console.print(f"  [red]Error: {result.stderr[:200]}[/red]")
+
+            except subprocess.TimeoutExpired:
+                error_count += 1
+                console.print("  [red]❌ Timeout[/red]")
+            except Exception as e:
+                error_count += 1
+                console.print(f"  [red]❌ Error: {e}[/red]")
+
+            console.print()
+
+            # Wait between transactions (except for last one)
+            if i < len(services):
+                console.print(f"  Waiting {wait_time} seconds before next transaction...")
+                for sec in range(wait_time):
+                    progress = "=" * (sec + 1)
+                    console.print(f"\r  [{sec+1}/{wait_time}] {progress}", end="")
+                    time.sleep(1)
+                console.print(f"\r  [{wait_time}/{wait_time}] ✓ Ready for next transaction")
+                console.print()
+
+    # Summary
+    console.print("=" * 60)
+    console.print("[bold]Summary:[/bold]")
+    console.print(f"Total services processed: {len(services)}")
+    if not dry_run:
+        console.print(f"Successful operations: {success_count}")
+        console.print(f"Failed operations: {error_count}")
+    console.print("=" * 60)
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN completed. Use without --dry-run to execute.[/yellow]")
+    elif error_count > 0:
+        console.print("\n[red]Some services failed. Check output above for details.[/red]")
+        raise typer.Exit(1)
+    else:
+        console.print("\n[green]All services added/modified successfully![/green]")
+
 
 @app.command()
 def delete_keys(
