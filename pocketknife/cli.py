@@ -853,7 +853,7 @@ def generate_keys(
     starting_index: Optional[int] = typer.Argument(None, help="Starting index for key numbering (non-negative integer)"),
     home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.poktroll)"),
     output_file: Path = typer.Option(None, "--output-file", help="Set output file path (default: auto-generated)"),
-    keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
+    keyring_backend: str = typer.Option("test", "--keyring-backend", help="Keyring backend to use (default: test)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
@@ -873,12 +873,12 @@ def generate_keys(
     Options:
     - --home: Set home directory for pocketd (default: ~/.poktroll)
     - --output-file: Set output file path (default: auto-generated timestamp-based name)
-    - --keyring-backend: Keyring backend to use (default: os)
+    - --keyring-backend: Keyring backend to use (default: test)
 
     Examples:
     - pocketknife generate-keys 10 grove-app 54
     - pocketknife generate-keys 10 grove-app 54 --home /home/ft/.poktroll
-    - pocketknife generate-keys 5 node 0 --home ~/.poktroll --output-file my_keys.txt --keyring-backend test
+    - pocketknife generate-keys 5 node 0 --home ~/.poktroll --output-file my_keys.txt --keyring-backend os
 
     Output File Format:
     The generated file contains one key per section with:
@@ -892,6 +892,8 @@ def generate_keys(
     - Output filename is auto-generated as: secrets_<key_prefix>_<starting_index>_<ending_index>.txt
     - Uses pocketd keys add command for key generation
     - Progress is shown for each key generated
+    - Default keyring backend is 'test' (no password required, like unstake command)
+    - Use '--keyring-backend os' if you need OS-level keyring with password protection
 
     Security Warning:
     The output file contains sensitive mnemonic phrases and private keys.
@@ -1010,26 +1012,45 @@ def generate_keys(
         cmd = ["pocketd", "keys", "add", key_name, "--home", str(home_dir), "--keyring-backend", keyring_backend]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            # For 'os' keyring backend, provide password via stdin (password + confirmation)
+            # For 'test' keyring backend, no password is needed
+            if keyring_backend == "os":
+                stdin_input = "12345678\n12345678\n"  # Password (min 8 chars) + confirmation
+            else:
+                stdin_input = None
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, input=stdin_input)
 
             if result.returncode == 0:
-                # Extract information from output
-                output_lines = result.stdout.split('\n')
+                # Extract address from stdout
+                stdout_lines = result.stdout.split('\n')
                 address = ""
+
+                for line in stdout_lines:
+                    if line.strip().startswith('- address:') or line.strip().startswith('address:'):
+                        address = line.split('address:')[1].strip()
+                        break
+
+                # Extract mnemonic from stderr (it's printed there with the warning message)
+                stderr_lines = result.stderr.split('\n')
                 mnemonic = ""
 
-                for line in output_lines:
-                    if line.strip().startswith('- address:'):
-                        address = line.split('- address:')[1].strip()
-
-                # Extract mnemonic (last non-empty line)
-                for line in reversed(output_lines):
-                    if line.strip() and not line.strip().startswith('-') and not line.strip().startswith('name:') and not line.strip().startswith('type:') and not line.strip().startswith('address:') and not line.strip().startswith('pubkey:'):
-                        mnemonic = line.strip()
+                # Find the mnemonic phrase - it's usually the last substantial line in stderr
+                # after the "Important" warning message
+                for i, line in enumerate(stderr_lines):
+                    if 'mnemonic phrase' in line.lower():
+                        # The mnemonic is typically a few lines after the warning
+                        # Look for the next non-empty line that contains multiple words
+                        for j in range(i+1, len(stderr_lines)):
+                            candidate = stderr_lines[j].strip()
+                            if candidate and len(candidate.split()) > 10:  # Mnemonic has 12 or 24 words
+                                mnemonic = candidate
+                                break
                         break
 
                 if not address or not mnemonic:
                     console.print(f"[red]✗ Failed to extract address or mnemonic for {key_name}[/red]")
+                    console.print(f"[dim]Address found: {bool(address)}, Mnemonic found: {bool(mnemonic)}[/dim]")
                     failed_count += 1
                     continue
 
@@ -1051,7 +1072,13 @@ def generate_keys(
                     "--yes"
                 ]
 
-                export_result = subprocess.run(export_cmd, capture_output=True, text=True, timeout=30)
+                # For 'os' keyring backend, provide password via stdin
+                if keyring_backend == "os":
+                    export_stdin = "12345678\n"  # Password (min 8 chars)
+                else:
+                    export_stdin = None
+
+                export_result = subprocess.run(export_cmd, capture_output=True, text=True, timeout=30, input=export_stdin)
 
                 if export_result.returncode == 0:
                     private_hex = export_result.stdout.strip()
@@ -1486,8 +1513,7 @@ def unstake(
         console.print("  [cyan]--signer-key[/cyan]  Keyring name to use for signing (must exist in 'test' keyring)")
         console.print("\n[bold]Example:[/bold]")
         console.print("  pocketknife unstake --file operators.txt --signer-key my-key")
-        console.print("\n[yellow]Note: The signer-key must exist in the 'test' keyring backend.[/yellow]")
-        console.print("\n[dim]Use 'pocketknife unstake --help' for full help.[/dim]")
+        console.print("\n[dim]Use 'pocketknife unstake --help' or 'pocketknife unstake -h' for full help.[/dim]")
         raise typer.Exit(1)
     
     home = Path("~/.pocket/").expanduser()
