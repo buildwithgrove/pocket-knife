@@ -2,6 +2,7 @@ import typer
 import subprocess
 import json
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.table import Table
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -86,7 +87,7 @@ def add_services(
     services_file: Path = typer.Argument(..., help="Path to services file (tab or space-separated)"),
     network: str = typer.Argument(..., help="Network: 'main' or 'beta'"),
     from_address: str = typer.Argument(..., help="Address/key name for --from flag"),
-    home_dir: Path = typer.Option(Path.home() / ".pocket", "--home", "-d", help="Home directory for pocketd"),
+    home_dir: Path = typer.Option(Path.home() / ".poktroll", "--home", help="Home directory for pocketd"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
     wait_time: int = typer.Option(5, "--wait", "-w", help="Seconds to wait between transactions"),
 ):
@@ -102,7 +103,7 @@ def add_services(
     - from_address: Address/key name for --from flag
 
     Options:
-    - --home, -d: Home directory for pocketd (default: ~/.pocket)
+    - --home: Home directory for pocketd (default: ~/.poktroll)
     - --dry-run: Show commands without executing
     - --wait, -w: Seconds to wait between transactions (default: 5)
 
@@ -847,42 +848,74 @@ def fetch_suppliers(
 @app.command()
 def generate_keys(
     ctx: typer.Context,
-    num_keys: int = typer.Argument(..., help="Number of keys to generate (positive integer)"),
-    key_prefix: str = typer.Argument(..., help="Prefix for key names (e.g., 'grove-app', 'node')"),
-    starting_index: int = typer.Argument(..., help="Starting index for key numbering (non-negative integer)"),
-    home_dir: Path = typer.Option(None, "--home", "-d", help="Set home directory for pocketd (default: ~/.poktroll)"),
-    output_file: Path = typer.Option(None, "--output", "-o", help="Set output file path (default: auto-generated)"),
+    num_keys: Optional[int] = typer.Argument(None, help="Number of keys to generate (positive integer)"),
+    key_prefix: Optional[str] = typer.Argument(None, help="Prefix for key names (e.g., 'grove-app', 'node')"),
+    starting_index: Optional[int] = typer.Argument(None, help="Starting index for key numbering (non-negative integer)"),
+    home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.poktroll)"),
+    output_file: Path = typer.Option(None, "--output-file", help="Set output file path (default: auto-generated)"),
     keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Generate multiple keys and save mnemonics and private hex keys to secrets file.
 
+    USAGE:
+      pocketknife generate-keys <num_keys> <key_prefix> <starting_index> [OPTIONS]
+
     This command generates multiple keys using pocketd and saves their mnemonics
     and private hex keys to a secrets file for backup and recovery purposes.
 
     Arguments:
-    - num_keys: Number of keys to generate (positive integer)
+    - num_keys: Number of keys to generate (must be positive integer)
     - key_prefix: Prefix for key names (e.g., 'grove-app', 'node')
-    - starting_index: Starting index for key numbering (non-negative integer)
+    - starting_index: Starting index for key numbering (must be non-negative)
 
     Options:
-    - --home, -d: Set home directory for pocketd (default: ~/.poktroll)
-    - --output, -o: Set output file path (default: auto-generated)
+    - --home: Set home directory for pocketd (default: ~/.poktroll)
+    - --output-file: Set output file path (default: auto-generated timestamp-based name)
     - --keyring-backend: Keyring backend to use (default: os)
 
     Examples:
     - pocketknife generate-keys 10 grove-app 54
     - pocketknife generate-keys 10 grove-app 54 --home /home/ft/.poktroll
-    - pocketknife generate-keys 5 node 0 -d ~/.poktroll -o my_keys.txt --keyring-backend test
+    - pocketknife generate-keys 5 node 0 --home ~/.poktroll --output-file my_keys.txt --keyring-backend test
+
+    Output File Format:
+    The generated file contains one key per section with:
+    - Key name (e.g., grove-app-54)
+    - 24-word mnemonic phrase
+    - Private key in hex format
+    - Separator lines between entries
+
+    Notes:
+    - Keys are named as: <key_prefix>-<index> (e.g., grove-app-54, grove-app-55, ...)
+    - Output filename is auto-generated as: secrets_<key_prefix>_<starting_index>_<ending_index>.txt
+    - Uses pocketd keys add command for key generation
+    - Progress is shown for each key generated
 
     Security Warning:
     The output file contains sensitive mnemonic phrases and private keys.
     Ensure proper file permissions: chmod 600 <output_file>
+    Store in a secure location and never commit to version control.
     """
     if h:
         console.print(ctx.get_help())
         raise typer.Exit(0)
+
+    # Check for missing required arguments
+    if num_keys is None or key_prefix is None or starting_index is None:
+        console.print("[red]Error: Missing required arguments[/red]\n")
+        console.print("[bold]Generate Keys Command Help:[/bold]")
+        console.print("Generate multiple keys with mnemonics and private hex keys.\n")
+        console.print("[bold]Required Arguments:[/bold]")
+        console.print("  [cyan]num_keys[/cyan]        Number of keys to generate (positive integer)")
+        console.print("  [cyan]key_prefix[/cyan]      Prefix for key names (e.g., 'grove-app', 'node')")
+        console.print("  [cyan]starting_index[/cyan]  Starting index for key numbering (non-negative integer)")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife generate-keys 10 grove-app 54")
+        console.print("\n[dim]Use 'pocketknife generate-keys --help' or 'pocketknife generate-keys -h' for full help.[/dim]")
+        raise typer.Exit(1)
+
     # Validate num_keys
     if num_keys <= 0:
         console.print("[red]Error: num_keys must be a positive integer[/red]")
