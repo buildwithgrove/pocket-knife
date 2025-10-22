@@ -19,6 +19,7 @@
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
 | **generate-keys** | Generate multiple keys with mnemonics | • Batch key generation with custom prefixes<br>• Saves mnemonics to secure file<br>• Configurable home directory and output path<br>• Security warnings and best practices |
+| **import-keys** | Import keys from mnemonic file | • Parses secrets file format<br>• Batch import with progress tracking<br>• Detects existing keys<br>• Configurable keyring backend<br>• Security reminders |
 | **stake-apps** | Stake applications (single or batch mode) | • Single and batch staking modes<br>• Optional gateway delegation with 60s delay<br>• YAML config file generation<br>• Dry-run support |
 | **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake, delegator stake types<br>• Separates delegator rewards into dedicated section<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **treasury-tools** | Individual balance type analysis | • All subcommands now support both text files and JSON files<br>• JSON files automatically extract from appropriate arrays<br>• Perfect for focused analysis of specific address types<br>• Backward compatible with existing text files |
@@ -238,6 +239,51 @@ Key #2: grove-app55 (Index: 55)
 - **Error handling** - Graceful failure with detailed logs
 
 **⚠️ SECURITY WARNING:** The output file contains sensitive mnemonic phrases. Always run `chmod 600` on the output file to restrict access!
+
+### Importing Keys from Mnemonics
+
+> Batch import keys from a secrets file containing mnemonics
+
+**Use case:** Perfect for restoring keys from backup or migrating keys between systems
+
+```bash
+# Import keys from a secrets file
+pocketknife import-keys secrets_grove-app
+
+# Import with custom home directory
+pocketknife import-keys secrets_node_0-9 --home ~/.poktroll
+
+# Import with OS keyring backend (requires password)
+pocketknife import-keys my_backup.txt --keyring-backend os
+```
+
+**Expected file format:**
+```
+# Pocket Shannon Keys
+# Generated on: 2025-10-19 15:30:00
+============================================================
+Key #1: grove-app54 (Index: 54)
+============================================================
+Address: pokt1abc123...
+Name: grove-app54
+Public Key: {"@type":"/cosmos.crypto..."}
+Mnemonic: word1 word2 word3 ... word24
+
+============================================================
+Key #2: grove-app55 (Index: 55)
+============================================================
+...
+```
+
+**Features:**
+- **Automatic parsing** - Reads secrets file format automatically
+- **Batch import** - Process multiple keys in one command
+- **Progress tracking** - Real-time status for each key
+- **Duplicate detection** - Warns if key already exists in keyring
+- **Error handling** - Graceful failure with detailed logs
+- **Keyring backend** - Defaults to 'test' (no password), supports 'os' backend
+
+**⚠️ SECURITY WARNING:** This command imports private keys to your keyring. Only import from trusted sources! Securely delete or store the secrets file after import.
 
 ### Fetching Supplier Addresses
 
