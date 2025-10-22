@@ -94,6 +94,8 @@ def add_services(
     home_dir: Path = typer.Option(Path.home() / ".pocket", "--home", help="Home directory for pocketd"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
     wait_time: int = typer.Option(5, "--wait", "-w", help="Seconds to wait between transactions"),
+    keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
 ):
     """
     Add or modify services on Pocket Network from a file.
@@ -237,6 +239,7 @@ def add_services(
             "--from", from_address,
             "--chain-id", chain_id,
             "--home", str(home_dir),
+            "--keyring-backend", keyring_backend,
             "--unordered",
             "--timeout-duration=60s",
             "--yes"
@@ -248,7 +251,9 @@ def add_services(
             console.print(f"[{i}] Adding/modifying service: {service_id} ({service_description}) with CUTTM: {cuttm}")
 
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                # For 'os' keyring backend, provide password via stdin
+                stdin_input = f"{pwd}\n" if keyring_backend == "os" else None
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, input=stdin_input)
 
                 # Check if successful (exit code 0 and no meaningful raw_log error)
                 if result.returncode == 0 and ('raw_log: ""' in result.stdout or 'raw_log' not in result.stdout):
@@ -469,6 +474,7 @@ def stake_apps(
     node: str = typer.Option(None, "--node", help="Custom RPC endpoint"),
     home: Path = typer.Option(None, "--home", help="Home directory for pocketd"),
     keyring_backend: str = typer.Option(None, "--keyring-backend", help="Keyring backend"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     chain_id: str = typer.Option("pocket", "--chain-id", help="Chain ID"),
 ):
     """
@@ -618,7 +624,9 @@ def stake_apps(
 
         console.print(f"[blue]🔨 Executing stake command...[/blue]")
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            # For 'os' keyring backend, provide password via stdin
+            stdin_input = f"{pwd}\n" if keyring_backend == "os" else None
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, input=stdin_input)
             if result.returncode == 0:
                 console.print(f"[green]✅ Successfully staked application for {from_addr}[/green]")
                 return True
@@ -669,7 +677,9 @@ def stake_apps(
 
         console.print(f"[blue]🔨 Executing delegate command...[/blue]")
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            # For 'os' keyring backend, provide password via stdin
+            stdin_input = f"{pwd}\n" if keyring_backend == "os" else None
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, input=stdin_input)
             if result.returncode == 0:
                 console.print(f"[green]✅ Successfully delegated {from_addr} to gateway[/green]")
                 return True
@@ -858,6 +868,7 @@ def generate_keys(
     home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.pocket)"),
     output_file: Path = typer.Option(None, "--output-file", help="Set output file path (default: auto-generated)"),
     keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
@@ -1007,7 +1018,7 @@ def generate_keys(
             # For 'os' keyring backend, provide password via stdin (password + confirmation)
             # For 'test' keyring backend, no password is needed
             if keyring_backend == "os":
-                stdin_input = "12345678\n12345678\n"  # Password (min 8 chars) + confirmation
+                stdin_input = f"{pwd}\n{pwd}\n"  # Password (min 8 chars) + confirmation
             else:
                 stdin_input = None
 
@@ -1077,7 +1088,7 @@ def generate_keys(
 
                 # For 'os' keyring backend, provide password via stdin
                 if keyring_backend == "os":
-                    export_stdin = "12345678\n"  # Password (min 8 chars)
+                    export_stdin = f"{pwd}\n"  # Password (min 8 chars)
                 else:
                     export_stdin = None
 
@@ -1146,6 +1157,7 @@ def import_keys(
     file: Optional[Path] = typer.Option(None, "--file", "-f", help="File for batch import mode"),
     home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.pocket)"),
     keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
@@ -1358,7 +1370,7 @@ def import_keys(
                 # For 'os' keyring backend, provide password via stdin after mnemonic
                 # For 'test' keyring backend, no password is needed
                 if keyring_backend == "os":
-                    stdin_input = key_secret + "\n" + "12345678\n12345678\n"
+                    stdin_input = key_secret + "\n" + f"{pwd}\n{pwd}\n"
                 else:
                     stdin_input = key_secret + "\n"
 
@@ -1391,7 +1403,7 @@ def import_keys(
 
                 # For hex import with 'os' backend, provide password
                 if keyring_backend == "os":
-                    stdin_input = "12345678\n12345678\n"
+                    stdin_input = f"{pwd}\n{pwd}\n"
                 else:
                     stdin_input = None
 
@@ -1460,6 +1472,7 @@ def export_keys(
     output: Optional[Path] = typer.Option(None, "--output", "-o", help="Output file (default: stdout)"),
     home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.pocket)"),
     keyring_backend: str = typer.Option("os", "--keyring-backend", help="Keyring backend to use (default: os)"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
@@ -1653,7 +1666,7 @@ def export_keys(
 
             # For 'os' keyring backend, provide password via stdin
             if keyring_backend == "os":
-                export_stdin = "12345678\n"  # Password
+                export_stdin = f"{pwd}\n"  # Password
             else:
                 export_stdin = None
 
@@ -2082,17 +2095,21 @@ def treasury(
 def unstake(
     ctx: typer.Context,
     operator_addresses_file: Path = typer.Option(None, "--file", help="Path to file with operator addresses, one per line."),
-    signer_key: str = typer.Option(None, "--signer-key", help="Keyring name to use for signing. This key must exist in the 'test' keyring."),
+    signer_key: str = typer.Option(None, "--signer-key", help="Keyring name to use for signing. This key must exist in the specified keyring."),
+    keyring_backend: str = typer.Option("test", "--keyring-backend", help="Keyring backend to use (default: test)"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Mass-unstake operator addresses listed in a file.
 
-    Note: The signer-key must exist in the 'test' keyring backend, as this tool always uses --keyring-backend=test.
+    Note: The signer-key must exist in the specified keyring backend (default: test).
 
     Required options:
     --file: Path to file with operator addresses, one per line
-    --signer-key: Keyring name to use for signing (must exist in 'test' keyring)
+    --signer-key: Keyring name to use for signing (must exist in keyring)
+    --keyring-backend: Keyring backend to use (default: test)
+    --pwd: Password for keyring operations when using 'os' backend (default: 12345678)
     """
     if h:
         console.print(ctx.get_help())
@@ -2133,14 +2150,16 @@ def unstake(
             "--gas=auto",
             "--gas-adjustment=2.0",
             "--fees=200upokt",
-            "--keyring-backend=test",
+            f"--keyring-backend={keyring_backend}",
             "--unordered",
             "--timeout-duration=1m",
             "-y"  # Auto-confirm transactions
         ]
 
         console.print(f"[cyan]Unstaking {address}...[/cyan]")
-        result = subprocess.run(cmd)
+        # For 'os' keyring backend, provide password via stdin
+        stdin_input = f"{pwd}\n" if keyring_backend == "os" else None
+        result = subprocess.run(cmd, input=stdin_input, text=True)
         if result.returncode == 0:
             console.print(f"[green]Success:[/green] {address}")
         else:
