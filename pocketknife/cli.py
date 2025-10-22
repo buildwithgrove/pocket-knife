@@ -2,12 +2,17 @@ import typer
 import subprocess
 import json
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.table import Table
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-app = typer.Typer(help="Pocketknife CLI: Syntactic sugar for poktroll operations.")
+app = typer.Typer(
+    help="Pocketknife CLI: Syntactic sugar for poktroll operations.",
+    add_help_option=True,
+    rich_markup_mode="rich"
+)
 
 # Create a subcommand group for specific treasury operations
 treasury_app = typer.Typer(help="Specific treasury operations (use main 'treasury' command for full analysis)")
@@ -15,21 +20,24 @@ app.add_typer(treasury_app, name="treasury-tools")
 console = Console()
 
 @app.callback(invoke_without_command=True)
-def main(ctx: typer.Context):
+def main(
+    ctx: typer.Context,
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
+):
     """
     Pocketknife CLI: Syntactic sugar for poktroll operations.
-    
+
     Available commands:
     - add-services: Add or modify services from file
     - delete-keys: Delete keys from keyring
     - fetch-suppliers: Fetch supplier addresses
-    - import-keys: Import keys from mnemonic file
+    - generate-keys: Generate multiple keys with mnemonics
     - stake-apps: Stake applications (single or batch)
     - treasury: Calculate treasury balances
     - unstake: Mass-unstake operations
     - treasury-tools: Specific treasury operations
     """
-    if ctx.invoked_subcommand is None:
+    if h or ctx.invoked_subcommand is None:
         console.print("[bold blue]Pocketknife CLI[/bold blue]")
         console.print("Syntactic sugar for poktroll operations.\n")
 
@@ -37,13 +45,13 @@ def main(ctx: typer.Context):
         console.print("  [cyan]add-services[/cyan]     Add or modify services from file")
         console.print("  [cyan]delete-keys[/cyan]      Delete keys from keyring")
         console.print("  [cyan]fetch-suppliers[/cyan]  Fetch supplier addresses")
-        console.print("  [cyan]import-keys[/cyan]      Import keys from mnemonic file")
+        console.print("  [cyan]generate-keys[/cyan]    Generate multiple keys with mnemonics")
         console.print("  [cyan]stake-apps[/cyan]       Stake applications (single or batch)")
         console.print("  [cyan]treasury[/cyan]         Calculate treasury balances")
         console.print("  [cyan]treasury-tools[/cyan]   Specific treasury operations")
         console.print("  [cyan]unstake[/cyan]          Mass-unstake operations")
-        
-        console.print("\n[dim]Use 'pocketknife [COMMAND] --help' for more information about a command.[/dim]")
+
+        console.print("\n[dim]Use 'pocketknife [COMMAND] --help' or 'pocketknife [COMMAND] -h' for more information.[/dim]")
         ctx.exit(0)
 
 @treasury_app.callback(invoke_without_command=True)
@@ -79,7 +87,7 @@ def add_services(
     services_file: Path = typer.Argument(..., help="Path to services file (tab or space-separated)"),
     network: str = typer.Argument(..., help="Network: 'main' or 'beta'"),
     from_address: str = typer.Argument(..., help="Address/key name for --from flag"),
-    home_dir: Path = typer.Option(Path.home() / ".pocket", "--home", "-d", help="Home directory for pocketd"),
+    home_dir: Path = typer.Option(Path.home() / ".poktroll", "--home", help="Home directory for pocketd"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show commands without executing"),
     wait_time: int = typer.Option(5, "--wait", "-w", help="Seconds to wait between transactions"),
 ):
@@ -95,7 +103,7 @@ def add_services(
     - from_address: Address/key name for --from flag
 
     Options:
-    - --home, -d: Home directory for pocketd (default: ~/.pocket)
+    - --home: Home directory for pocketd (default: ~/.poktroll)
     - --dry-run: Show commands without executing
     - --wait, -w: Seconds to wait between transactions (default: 5)
 
@@ -301,20 +309,26 @@ def add_services(
 
 @app.command()
 def delete_keys(
+    ctx: typer.Context,
     dry_run: bool = typer.Option(False, "--dry-run", help="Show commands that would be executed without running them"),
     keyring_name: str = typer.Option("os", "--keyring", help="Name of the keyring to delete keys from (default: os)"),
     pattern: str = typer.Option(None, "--pattern", help="Delete only keys containing this pattern (e.g., 'grove-app')"),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Delete all keys or pattern-matched keys in a specified keyring using pocketd.
-    
+
     WARNING: This will permanently delete keys! Make sure you have backups.
-    
+
     Optional options:
     --dry-run: Show commands that would be executed without running them
     --keyring: Name of the keyring to delete keys from (default: os)
     --pattern: Delete only keys containing this pattern (e.g., 'grove-app')
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     # Check if pocketd command is available
     if not subprocess.run(["which", "pocketd"], capture_output=True).returncode == 0:
         console.print("[red]Error: pocketd command not found.[/red]")
@@ -774,14 +788,18 @@ def fetch_suppliers(
     ctx: typer.Context,
     output_file: Path = typer.Option(None, "--output-file", help="Path to save the operator addresses"),
     owner_address: str = typer.Option(None, "--owner-address", help="Owner address to fetch suppliers for"),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Fetch all supplier operator addresses for a given owner address and save to file.
-    
+
     Required options:
     --owner-address: Owner address to fetch suppliers for
     --output-file: Path to save the operator addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
     # Check for missing required options
     if output_file is None or owner_address is None:
         console.print("[red]Error: Missing required options[/red]\n")
@@ -828,53 +846,107 @@ def fetch_suppliers(
 
 
 @app.command()
-def import_keys(
-    secrets_file: Path = typer.Argument(..., help="Path to secrets file containing mnemonics"),
-    home_dir: Path = typer.Option(None, "--home", "-d", help="Set home directory for pocketd (default: ~/.poktroll)"),
+def generate_keys(
+    ctx: typer.Context,
+    num_keys: Optional[int] = typer.Argument(None, help="Number of keys to generate (positive integer)"),
+    key_prefix: Optional[str] = typer.Argument(None, help="Prefix for key names (e.g., 'grove-app', 'node')"),
+    starting_index: Optional[int] = typer.Argument(None, help="Starting index for key numbering (non-negative integer)"),
+    home_dir: Path = typer.Option(None, "--home", help="Set home directory for pocketd (default: ~/.poktroll)"),
+    output_file: Path = typer.Option(None, "--output-file", help="Set output file path (default: auto-generated)"),
+    keyring_backend: str = typer.Option("test", "--keyring-backend", help="Keyring backend to use (default: test)"),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
-    Import keys from a secrets file containing mnemonics.
+    Generate multiple keys and save mnemonics and private hex keys to secrets file.
 
-    This command reads a secrets file (generated by generate-keys or shannon-key-generator.sh)
-    and imports the keys using their mnemonics.
+    USAGE:
+      pocketknife generate-keys <num_keys> <key_prefix> <starting_index> [OPTIONS]
+
+    This command generates multiple keys using pocketd and saves their mnemonics
+    and private hex keys to a secrets file for backup and recovery purposes.
 
     Arguments:
-    - secrets_file: Path to secrets file containing key names and mnemonics
+    - num_keys: Number of keys to generate (must be positive integer)
+    - key_prefix: Prefix for key names (e.g., 'grove-app', 'node')
+    - starting_index: Starting index for key numbering (must be non-negative)
 
     Options:
-    - --home, -d: Set home directory for pocketd (default: ~/.poktroll)
-
-    Expected file format:
-    ============================================================
-    Key #1: keyname1 (Index: 0)
-    ============================================================
-    Address: pokt1...
-    Name: keyname1
-    Public Key: ...
-    Mnemonic: word1 word2 word3 ... word24
-
-    ============================================================
-    Key #2: keyname2 (Index: 1)
-    ============================================================
-    ...
+    - --home: Set home directory for pocketd (default: ~/.poktroll)
+    - --output-file: Set output file path (default: auto-generated timestamp-based name)
+    - --keyring-backend: Keyring backend to use (default: test)
 
     Examples:
-    - pocketknife import-keys secrets_grove-app
-    - pocketknife import-keys secrets_node_0-9 --home ~/.poktroll
+    - pocketknife generate-keys 10 grove-app 54
+    - pocketknife generate-keys 10 grove-app 54 --home /home/ft/.poktroll
+    - pocketknife generate-keys 5 node 0 --home ~/.poktroll --output-file my_keys.txt --keyring-backend os
+
+    Output File Format:
+    The generated file contains one key per section with:
+    - Key name (e.g., grove-app-54)
+    - 24-word mnemonic phrase
+    - Private key in hex format
+    - Separator lines between entries
+
+    Notes:
+    - Keys are named as: <key_prefix>-<index> (e.g., grove-app-54, grove-app-55, ...)
+    - Output filename is auto-generated as: secrets_<key_prefix>_<starting_index>_<ending_index>.txt
+    - Uses pocketd keys add command for key generation
+    - Progress is shown for each key generated
+    - Default keyring backend is 'test' (no password required, like unstake command)
+    - Use '--keyring-backend os' if you need OS-level keyring with password protection
 
     Security Warning:
-    This command will import private keys to your keyring.
-    Ensure the secrets file is from a trusted source.
+    The output file contains sensitive mnemonic phrases and private keys.
+    Ensure proper file permissions: chmod 600 <output_file>
+    Store in a secure location and never commit to version control.
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
+    # Check for missing required arguments
+    if num_keys is None or key_prefix is None or starting_index is None:
+        console.print("[red]Error: Missing required arguments[/red]\n")
+        console.print("[bold]Generate Keys Command Help:[/bold]")
+        console.print("Generate multiple keys with mnemonics and private hex keys.\n")
+        console.print("[bold]Required Arguments:[/bold]")
+        console.print("  [cyan]num_keys[/cyan]        Number of keys to generate (positive integer)")
+        console.print("  [cyan]key_prefix[/cyan]      Prefix for key names (e.g., 'grove-app', 'node')")
+        console.print("  [cyan]starting_index[/cyan]  Starting index for key numbering (non-negative integer)")
+        console.print("\n[bold]Example:[/bold]")
+        console.print("  pocketknife generate-keys 10 grove-app 54")
+        console.print("\n[dim]Use 'pocketknife generate-keys --help' or 'pocketknife generate-keys -h' for full help.[/dim]")
+        raise typer.Exit(1)
+
+    # Validate num_keys
+    if num_keys <= 0:
+        console.print("[red]Error: num_keys must be a positive integer[/red]")
+        raise typer.Exit(1)
+
+    # Validate starting_index
+    if starting_index < 0:
+        console.print("[red]Error: starting_index must be a non-negative integer[/red]")
+        raise typer.Exit(1)
+
     # Set default home directory if not provided
     if home_dir is None:
         home_dir = Path.home() / ".poktroll"
         console.print(f"[yellow]Using default home directory: {home_dir}[/yellow]")
 
-    # Check if secrets file exists
-    if not secrets_file.exists():
-        console.print(f"[red]Error: Secrets file not found: {secrets_file}[/red]")
-        raise typer.Exit(1)
+    # Validate home directory exists or can be created
+    if not home_dir.exists():
+        console.print(f"[yellow]Warning: Home directory '{home_dir}' does not exist[/yellow]")
+        console.print("[yellow]pocketd will attempt to create it if needed[/yellow]")
+
+    # Calculate ending index
+    ending_index = starting_index + num_keys - 1
+
+    # Set default output file if not provided
+    if output_file is None:
+        if starting_index == 0:
+            output_file = Path(f"secrets_{key_prefix}")
+        else:
+            output_file = Path(f"secrets_{key_prefix}_{starting_index}-{ending_index}")
 
     # Check if pocketd command is available
     if subprocess.run(["which", "pocketd"], capture_output=True).returncode != 0:
@@ -883,151 +955,175 @@ def import_keys(
 
     # Header
     console.print("=" * 60)
-    console.print("[bold blue]  Pocket Key Importer[/bold blue]")
+    console.print("[bold blue]  Pocket Shannon Key Generator[/bold blue]")
     console.print("=" * 60)
     console.print()
 
     # Display configuration
     console.print("[yellow]Configuration:[/yellow]")
-    console.print(f"[blue]  Secrets file: {secrets_file}[/blue]")
+    console.print(f"[blue]  Number of keys: {num_keys}[/blue]")
+    console.print(f"[blue]  Key prefix: {key_prefix}[/blue]")
+    console.print(f"[blue]  Starting index: {starting_index}[/blue]")
+    console.print(f"[blue]  Ending index: {ending_index}[/blue]")
+    console.print(f"[blue]  Key range: {key_prefix}{starting_index} to {key_prefix}{ending_index}[/blue]")
     console.print(f"[blue]  Home directory: {home_dir}[/blue]")
+    console.print(f"[blue]  Keyring backend: {keyring_backend}[/blue]")
+    console.print(f"[blue]  Output file: {output_file}[/blue]")
     console.print()
 
-    # Parse the secrets file
-    console.print("[yellow]Parsing secrets file...[/yellow]")
+    from datetime import datetime
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    keys_to_import = []
-    current_key = {}
-
+    # Initialize the output file
     try:
-        with secrets_file.open('r') as f:
-            for line in f:
-                line = line.strip()
-
-                # Skip empty lines and comment lines
-                if not line or line.startswith('#'):
-                    continue
-
-                # Check for key header (e.g., "Key #1: keyname1 (Index: 0)")
-                if line.startswith('Key #'):
-                    # Save previous key if it exists
-                    if current_key and 'name' in current_key and 'mnemonic' in current_key:
-                        keys_to_import.append(current_key)
-
-                    # Start new key
-                    current_key = {}
-                    # Extract key name from header
-                    if ':' in line:
-                        parts = line.split(':', 1)[1].strip()
-                        if '(' in parts:
-                            key_name = parts.split('(')[0].strip()
-                            current_key['name'] = key_name
-
-                # Extract name field
-                elif line.startswith('Name:'):
-                    key_name = line.split('Name:')[1].strip()
-                    current_key['name'] = key_name
-
-                # Extract mnemonic field
-                elif line.startswith('Mnemonic:'):
-                    mnemonic = line.split('Mnemonic:')[1].strip()
-                    current_key['mnemonic'] = mnemonic
-
-                # Skip separator lines
-                elif line.startswith('='):
-                    continue
-
-            # Don't forget the last key
-            if current_key and 'name' in current_key and 'mnemonic' in current_key:
-                keys_to_import.append(current_key)
-
+        with output_file.open('w') as f:
+            f.write(f"# Pocket Shannon Keys\n")
+            f.write(f"# Generated on: {timestamp}\n")
+            f.write(f"# Number of keys: {num_keys}\n")
+            f.write(f"# Starting index: {starting_index}\n")
+            f.write(f"# Ending index: {ending_index}\n")
+            f.write(f"# Key prefix: {key_prefix}\n")
+            f.write(f"# Home directory: {home_dir}\n")
+            f.write(f"# Keyring backend: {keyring_backend}\n")
+            f.write(f"# Key range: {key_prefix}{starting_index} to {key_prefix}{ending_index}\n")
+            f.write(f"#\n")
+            f.write(f"# Format: <keyname> <address> <mnemonic>\n")
+            f.write(f"# Followed by: <keyname> <address> <privatehex>\n")
+            f.write("\n")
     except Exception as e:
-        console.print(f"[red]Error reading secrets file:[/red] {e}")
+        console.print(f"[red]Error creating output file:[/red] {e}")
         raise typer.Exit(1)
 
-    if not keys_to_import:
-        console.print("[red]No valid keys found in secrets file.[/red]")
-        console.print("[yellow]Expected format: Key name and mnemonic fields[/yellow]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]Found {len(keys_to_import)} key(s) to import[/green]")
+    console.print("[green]Starting key generation...[/green]")
+    console.print(f"[yellow]Output will be saved to: {output_file}[/yellow]")
     console.print()
 
-    # Import keys
-    console.print("[green]Starting key import...[/green]")
-    console.print()
-
+    # Generate keys
     success_count = 0
     failed_count = 0
 
-    for i, key_data in enumerate(keys_to_import, 1):
-        key_name = key_data['name']
-        mnemonic = key_data['mnemonic']
+    for i in range(num_keys):
+        current_index = starting_index + i
+        key_name = f"{key_prefix}{current_index}"
 
-        console.print(f"[blue]Importing key {i}/{len(keys_to_import)}: {key_name}[/blue]")
+        console.print(f"[blue]Generating key {i+1}/{num_keys}: {key_name} (index: {current_index})[/blue]")
 
-        # Run the pocketd command with mnemonic via stdin
-        cmd = [
-            "pocketd", "keys", "add", key_name,
-            "--recover",
-            "--home", str(home_dir)
-        ]
+        # Run the pocketd keys add command
+        cmd = ["pocketd", "keys", "add", key_name, "--home", str(home_dir), "--keyring-backend", keyring_backend]
 
         try:
-            # Use Popen to send mnemonic via stdin
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
+            # For 'os' keyring backend, provide password via stdin (password + confirmation)
+            # For 'test' keyring backend, no password is needed
+            if keyring_backend == "os":
+                stdin_input = "12345678\n12345678\n"  # Password (min 8 chars) + confirmation
+            else:
+                stdin_input = None
 
-            # Send mnemonic to stdin
-            stdout, stderr = process.communicate(input=mnemonic + '\n', timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, input=stdin_input)
 
-            if process.returncode == 0:
-                console.print(f"[green]✓ Key {key_name} imported successfully[/green]")
+            if result.returncode == 0:
+                # Extract address from stdout
+                stdout_lines = result.stdout.split('\n')
+                address = ""
 
-                # Extract and display address if available
-                for line in stdout.split('\n'):
-                    if line.strip().startswith('- address:'):
-                        address = line.split('- address:')[1].strip()
-                        console.print(f"[dim]  Address: {address}[/dim]")
+                for line in stdout_lines:
+                    if line.strip().startswith('- address:') or line.strip().startswith('address:'):
+                        address = line.split('address:')[1].strip()
                         break
 
-                success_count += 1
+                # Extract mnemonic from stderr (it's printed there with the warning message)
+                stderr_lines = result.stderr.split('\n')
+                mnemonic = ""
+
+                # Find the mnemonic phrase - it's usually the last substantial line in stderr
+                # after the "Important" warning message
+                for i, line in enumerate(stderr_lines):
+                    if 'mnemonic phrase' in line.lower():
+                        # The mnemonic is typically a few lines after the warning
+                        # Look for the next non-empty line that contains multiple words
+                        for j in range(i+1, len(stderr_lines)):
+                            candidate = stderr_lines[j].strip()
+                            if candidate and len(candidate.split()) > 10:  # Mnemonic has 12 or 24 words
+                                mnemonic = candidate
+                                break
+                        break
+
+                if not address or not mnemonic:
+                    console.print(f"[red]✗ Failed to extract address or mnemonic for {key_name}[/red]")
+                    console.print(f"[dim]Address found: {bool(address)}, Mnemonic found: {bool(mnemonic)}[/dim]")
+                    failed_count += 1
+                    continue
+
+                # Write mnemonic line to file: <keyname> <address> <mnemonic>
+                with output_file.open('a') as f:
+                    f.write(f"{key_name} {address} {mnemonic}\n")
+
+                console.print(f"[green]✓ Key {key_name} generated successfully[/green]")
+                console.print(f"[dim]  Address: {address}[/dim]")
+
+                # Now export the private key hex
+                console.print(f"[blue]  Exporting private key for {key_name}...[/blue]")
+                export_cmd = [
+                    "pocketd", "keys", "export", key_name,
+                    "--home", str(home_dir),
+                    "--keyring-backend", keyring_backend,
+                    "--unsafe",
+                    "--unarmored-hex",
+                    "--yes"
+                ]
+
+                # For 'os' keyring backend, provide password via stdin
+                if keyring_backend == "os":
+                    export_stdin = "12345678\n"  # Password (min 8 chars)
+                else:
+                    export_stdin = None
+
+                export_result = subprocess.run(export_cmd, capture_output=True, text=True, timeout=30, input=export_stdin)
+
+                if export_result.returncode == 0:
+                    private_hex = export_result.stdout.strip()
+
+                    # Write private hex line to file: <keyname> <address> <privatehex>
+                    with output_file.open('a') as f:
+                        f.write(f"{key_name} {address} {private_hex}\n")
+
+                    console.print(f"[green]  ✓ Private key exported successfully[/green]")
+                    success_count += 1
+                else:
+                    console.print(f"[red]  ✗ Failed to export private key for {key_name}[/red]")
+                    console.print(f"[red]  Error: {export_result.stderr}[/red]")
+                    # Still count as partial success since key was generated
+                    success_count += 1
+
             else:
-                console.print(f"[red]✗ Failed to import key {key_name}[/red]")
-                if stderr:
-                    # Check if key already exists
-                    if "already exists" in stderr.lower() or "override" in stderr.lower():
-                        console.print(f"[yellow]  Key already exists in keyring[/yellow]")
-                    else:
-                        console.print(f"[red]  Error: {stderr.strip()}[/red]")
+                console.print(f"[red]✗ Failed to generate key {key_name}[/red]")
+                console.print(f"[red]Error output: {result.stderr}[/red]")
                 failed_count += 1
 
         except subprocess.TimeoutExpired:
-            console.print(f"[red]✗ Timeout importing key {key_name}[/red]")
+            console.print(f"[red]✗ Timeout generating key {key_name}[/red]")
             failed_count += 1
         except Exception as e:
-            console.print(f"[red]✗ Error importing key {key_name}: {e}[/red]")
+            console.print(f"[red]✗ Error generating key {key_name}: {e}[/red]")
             failed_count += 1
 
         console.print()
 
     # Final summary
     console.print("=" * 60)
-    console.print("[green]Key import complete![/green]")
-    console.print(f"[blue]Successful imports: {success_count}/{len(keys_to_import)}[/blue]")
+    console.print("[green]Key generation complete![/green]")
+    console.print(f"[blue]Generated keys: {key_prefix}{starting_index} to {key_prefix}{ending_index}[/blue]")
+    console.print(f"[blue]Successful: {success_count}/{num_keys}[/blue]")
     if failed_count > 0:
-        console.print(f"[red]Failed imports: {failed_count}/{len(keys_to_import)}[/red]")
+        console.print(f"[red]Failed: {failed_count}/{num_keys}[/red]")
+    console.print(f"[yellow]Results saved to: {output_file}[/yellow]")
+    console.print("[red]⚠️  IMPORTANT: Keep the {0} file secure![/red]".format(output_file))
+    console.print("[red]⚠️  It contains sensitive mnemonic phrases![/red]")
     console.print("=" * 60)
 
-    # Security reminder
-    console.print()
-    console.print(f"[yellow]Security reminder: Securely delete or store the secrets file:[/yellow]")
-    console.print(f"[yellow]  {secrets_file}[/yellow]")
+    # Show file permissions recommendation
+    console.print(f"[blue]Recommended: Set restrictive permissions on {output_file}[/blue]")
+    console.print(f"[blue]Run: chmod 600 {output_file}[/blue]")
 
 
 @app.command()
@@ -1035,18 +1131,23 @@ def treasury(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to JSON file with treasury addresses."),
     max_workers: int = typer.Option(10, "--max-workers", help="Maximum concurrent requests (default: 10)"),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate all balances (liquid, app stake, node stake, validator stake) for treasury addresses from JSON file.
     Uses parallel processing for significantly faster execution.
     Expected JSON format: {"liquid": [...], "app_stakes": [...], "node_stakes": [...], "validator_stakes": [...]}
-    
+
     Required options:
     --file: Path to JSON file with treasury addresses
-    
+
     Optional options:
     --max-workers: Maximum concurrent requests (default: 10)
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Treasury Command Help:[/bold]")
@@ -1387,16 +1488,21 @@ def unstake(
     ctx: typer.Context,
     operator_addresses_file: Path = typer.Option(None, "--file", help="Path to file with operator addresses, one per line."),
     signer_key: str = typer.Option(None, "--signer-key", help="Keyring name to use for signing. This key must exist in the 'test' keyring."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Mass-unstake operator addresses listed in a file.
 
     Note: The signer-key must exist in the 'test' keyring backend, as this tool always uses --keyring-backend=test.
-    
+
     Required options:
     --file: Path to file with operator addresses, one per line
     --signer-key: Keyring name to use for signing (must exist in 'test' keyring)
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     # Check for missing required options
     if operator_addresses_file is None or signer_key is None:
         console.print("[red]Error: Missing required options[/red]\n")
@@ -1407,8 +1513,7 @@ def unstake(
         console.print("  [cyan]--signer-key[/cyan]  Keyring name to use for signing (must exist in 'test' keyring)")
         console.print("\n[bold]Example:[/bold]")
         console.print("  pocketknife unstake --file operators.txt --signer-key my-key")
-        console.print("\n[yellow]Note: The signer-key must exist in the 'test' keyring backend.[/yellow]")
-        console.print("\n[dim]Use 'pocketknife unstake --help' for full help.[/dim]")
+        console.print("\n[dim]Use 'pocketknife unstake --help' or 'pocketknife unstake -h' for full help.[/dim]")
         raise typer.Exit(1)
     
     home = Path("~/.pocket/").expanduser()
@@ -2028,17 +2133,21 @@ def query_validator_stakes_parallel(addresses: list[str], max_workers: int = 10)
 def app_stakes(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'app_stakes' array)."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate app stake balances (liquid + staked) for addresses.
-    
+
     Supports two file formats:
     1. Text file: One address per line
     2. JSON file: Will extract addresses from 'app_stakes' array
-    
+
     Required options:
     --file: Path to file with addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]App Stakes Command Help:[/bold]")
@@ -2130,17 +2239,22 @@ def app_stakes(
 def liquid_balance(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'liquid' array)."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate liquid balance for addresses.
-    
+
     Supports two file formats:
     1. Text file: One address per line
     2. JSON file: Will extract addresses from 'liquid' array
-    
+
     Required options:
     --file: Path to file with addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Liquid Balance Command Help:[/bold]")
@@ -2220,17 +2334,22 @@ def liquid_balance(
 def node_stakes(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'node_stakes' array)."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate node stake balances (liquid + staked) for addresses.
-    
+
     Supports two file formats:
     1. Text file: One address per line
     2. JSON file: Will extract addresses from 'node_stakes' array
-    
+
     Required options:
     --file: Path to file with addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Node Stakes Command Help:[/bold]")
@@ -2322,17 +2441,22 @@ def node_stakes(
 def validator_stakes(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'validator_stakes' array)."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate validator stake balances (liquid + staked + validator rewards) for addresses.
-    
+
     Supports two file formats:
     1. Text file: One address per line
     2. JSON file: Will extract addresses from 'validator_stakes' array
-    
+
     Required options:
     --file: Path to file with addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Validator Stakes Command Help:[/bold]")
@@ -2430,17 +2554,22 @@ def validator_stakes(
 def delegator_stakes(
     ctx: typer.Context,
     addresses_file: Path = typer.Option(None, "--file", help="Path to file with addresses (text file with one per line, or JSON file with 'delegator_stakes' array)."),
+    h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
     Calculate delegator stake balances (liquid + delegator rewards) for addresses.
-    
+
     Supports two file formats:
     1. Text file: One address per line
     2. JSON file: Will extract addresses from 'delegator_stakes' array
-    
+
     Required options:
     --file: Path to file with addresses
     """
+    if h:
+        console.print(ctx.get_help())
+        raise typer.Exit(0)
+
     if addresses_file is None:
         console.print("[red]Error: Missing required option '--file'[/red]\n")
         console.print("[bold]Delegator Stakes Command Help:[/bold]")

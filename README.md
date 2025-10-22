@@ -18,7 +18,7 @@
 | **add-services** | Add or modify services from file | • Batch service operations<br>• Supports both main and beta networks<br>• Configurable wait time between transactions<br>• Dry-run mode for testing |
 | **delete-keys** | Delete keys from keyring (all or by pattern) | • Flexible pattern matching<br>• Safety confirmations and dry-run mode<br>• Defaults to OS keyring |
 | **fetch-suppliers** | Get all operator addresses for an owner | • Filters thousands of suppliers efficiently<br>• Outputs to file<br>• Deduplicates results |
-| **import-keys** | Import keys from mnemonic file | • Parses secrets file format<br>• Batch import with progress tracking<br>• Detects existing keys<br>• Security reminders |
+| **generate-keys** | Generate multiple keys with mnemonics | • Batch key generation with custom prefixes<br>• Saves mnemonics to secure file<br>• Configurable home directory and output path<br>• Security warnings and best practices |
 | **stake-apps** | Stake applications (single or batch mode) | • Single and batch staking modes<br>• Optional gateway delegation with 60s delay<br>• YAML config file generation<br>• Dry-run support |
 | **treasury** | Balance analysis from structured JSON input | • Handles liquid, app stake, node stake, validator stake, delegator stake types<br>• Separates delegator rewards into dedicated section<br>• Prevents double-counting addresses<br>• Calculates totals across categories |
 | **treasury-tools** | Individual balance type analysis | • All subcommands now support both text files and JSON files<br>• JSON files automatically extract from appropriate arrays<br>• Perfect for focused analysis of specific address types<br>• Backward compatible with existing text files |
@@ -193,27 +193,30 @@ pocketknife delete-keys --pattern grove-app --dry-run
 
 **⚠️ WARNING:** This will permanently delete keys! Make sure you have backups.
 
-### Importing Keys from Mnemonics
+### Generating Multiple Keys
 
-> Batch import keys from a secrets file containing mnemonics
+> Batch generate keys with mnemonics saved to a secure file
 
-**Use case:** Perfect for restoring keys from backup or migrating keys between systems
+**Use case:** Perfect for creating multiple application or node keys for Pocket Network
 
 ```bash
-# Import keys from a secrets file
-pocketknife import-keys secrets_grove-app
+# Generate 10 keys with prefix 'grove-app' starting at index 54
+pocketknife generate-keys 10 grove-app 54
 
-# Import with custom home directory
-pocketknife import-keys secrets_node_0-9 --home ~/.poktroll
+# Generate keys with custom home directory
+pocketknife generate-keys 10 grove-app 54 --home /home/ft/.poktroll
 
-# Import with short flag
-pocketknife import-keys my_backup.txt -d /custom/path
+# Generate keys with custom output file
+pocketknife generate-keys 5 node 0 -d ~/.poktroll -o my_keys.txt
 ```
 
-**Expected file format:**
+**Output format:**
 ```
 # Pocket Shannon Keys
 # Generated on: 2025-10-19 15:30:00
+# Number of keys: 10
+# Key prefix: grove-app
+# Key range: grove-app54 to grove-app63
 ============================================================
 Key #1: grove-app54 (Index: 54)
 ============================================================
@@ -224,18 +227,17 @@ Mnemonic: word1 word2 word3 ... word24
 
 ============================================================
 Key #2: grove-app55 (Index: 55)
-============================================================
 ...
 ```
 
 **Features:**
-- **Automatic parsing** - Reads secrets file format automatically
-- **Batch import** - Process multiple keys in one command
+- **Batch generation** - Create multiple keys in one command
+- **Custom naming** - Flexible prefix and index system
+- **Secure storage** - All mnemonics saved to file
 - **Progress tracking** - Real-time status for each key
-- **Duplicate detection** - Warns if key already exists in keyring
 - **Error handling** - Graceful failure with detailed logs
 
-**⚠️ SECURITY WARNING:** This command imports private keys to your keyring. Only import from trusted sources! Securely delete or store the secrets file after import.
+**⚠️ SECURITY WARNING:** The output file contains sensitive mnemonic phrases. Always run `chmod 600` on the output file to restrict access!
 
 ### Fetching Supplier Addresses
 
