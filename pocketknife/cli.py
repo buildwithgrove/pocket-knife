@@ -1630,7 +1630,13 @@ def export_keys(
                 "--keyring-backend", keyring_backend
             ]
 
-            show_result = subprocess.run(show_cmd, capture_output=True, text=True, timeout=30)
+            # For 'os' keyring backend, provide password via stdin
+            if keyring_backend == "os":
+                show_stdin = f"{pwd}\n"
+            else:
+                show_stdin = None
+
+            show_result = subprocess.run(show_cmd, capture_output=True, text=True, timeout=30, input=show_stdin)
 
             if show_result.returncode != 0:
                 console.print(f"[red]✗ Failed to get address for key {key_name}[/red]")
