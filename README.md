@@ -63,43 +63,13 @@ pip install -e .
 
 ## Keyring Backends
 
-Pocket Knife supports multiple keyring backends for different security needs:
+The `os` backend is used by default. For testing and development, you can use other backends:
 
-### `test` - Development (No Password)
 ```bash
-# Best for testing and development
+# Example: Using test backend (no password required)
 pocketknife generate-keys 5 myapp 0 --keyring-backend test
 pocketknife export-keys mykey --keyring-backend test
 ```
-- ✅ No password required
-- ⚠️ Unencrypted storage
-- 📁 Location: `~/.pocket/keyring-test/`
-
-### `os` - Production (Password Protected)
-```bash
-# Best for production use
-pocketknife export-keys mykey --keyring-backend os --pwd YOUR_PASSWORD
-pocketknife import-keys mykey addr secret -t hex --keyring-backend os --pwd YOUR_PASSWORD
-```
-- ✅ Encrypted and secure
-- ✅ Uses system keyring (macOS Keychain, Windows Credential Manager)
-- 🔐 Requires password
-
-### `file` - Encrypted File Storage
-```bash
-# Portable encrypted keyring
-pocketknife generate-keys 5 myapp 0 --keyring-backend file --pwd YOUR_PASSWORD
-```
-- ✅ Encrypted file-based storage
-- 🔐 Requires password
-- 📁 Location: `~/.pocket/keyring-file/`
-
-### Other Backends
-- **`memory`** - Temporary in-memory storage (not persistent)
-- **`kwallet`** - KDE Wallet (Linux)
-- **`pass`** - Pass password manager (Linux)
-
-**💡 Pro Tip:** Use `test` for development, `os` or `file` for production keys.
 
 ## Common Usage Patterns
 
@@ -144,24 +114,6 @@ pocketknife delete-keys --keyring test --pwd 12345678
 ### Network Endpoints
 - **Main RPC:** `https://shannon-grove-rpc.mainnet.poktroll.com`
 - **Beta RPC:** `https://shannon-testnet-grove-rpc.beta.poktroll.com`
-
-## Security Best Practices
-
-### ⚠️ Important Security Notes
-1. **Never commit keys to version control** - Add keyring files to `.gitignore`
-2. **Use `test` keyring only for development** - Not secure for production
-3. **Protect exported keys** - Run `chmod 600` on files containing private keys
-4. **Use strong passwords** - Minimum 8 characters for `os` and `file` keyrings
-5. **Backup your mnemonics securely** - Store in encrypted, offline storage
-
-### File Permissions
-```bash
-# Secure private key exports
-chmod 600 secrets_*.txt
-
-# Secure keyring directory
-chmod 700 ~/.pocket/keyring-*
-```
 
 ## Development
 
