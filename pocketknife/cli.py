@@ -322,6 +322,7 @@ def delete_keys(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show commands that would be executed without running them"),
     keyring_name: str = typer.Option("os", "--keyring", help="Name of the keyring to delete keys from (default: os)"),
     pattern: str = typer.Option(None, "--pattern", help="Delete only keys containing this pattern (e.g., 'grove-app')"),
+    pwd: str = typer.Option("12345678", "--pwd", help="Password for keyring operations (default: 12345678)"),
     h: bool = typer.Option(False, "-h", help="Show this help message and exit", hidden=True),
 ):
     """
@@ -374,13 +375,26 @@ def delete_keys(
 
     # Get list of all keys in keyring first
     console.print(f"[yellow]Getting list of all keys in keyring '{keyring_name}'...[/yellow]")
-    
+
     list_cmd = ["pocketd", "keys", "list", "--keyring-backend", keyring_name]
-    result = subprocess.run(list_cmd, capture_output=True, text=True)
-    
+
+    # For 'os' keyring backend, provide password via stdin
+    if keyring_name == "os":
+        list_stdin = f"{pwd}\n"
+    else:
+        list_stdin = None
+
+    result = subprocess.run(list_cmd, capture_output=True, text=True, input=list_stdin)
+
     if result.returncode != 0:
         console.print(f"[red]Error: Failed to list keys in keyring '{keyring_name}'[/red]")
         console.print("[red]Make sure the keyring exists and is accessible.[/red]")
+        raise typer.Exit(1)
+
+    # Check for incorrect passphrase in stderr
+    if "incorrect passphrase" in result.stderr:
+        console.print(f"[red]Error: Incorrect password for keyring '{keyring_name}'[/red]")
+        console.print(f"[yellow]Hint: Use --pwd flag to provide the correct password[/yellow]")
         raise typer.Exit(1)
     
     # Extract key names from YAML output format (lines with "name: keyname")
@@ -423,15 +437,21 @@ def delete_keys(
     for key_name in key_names_to_delete:
         if key_name:
             total_count += 1
-            
+
             cmd = ["pocketd", "keys", "delete", "--keyring-backend", keyring_name, "--yes", key_name]
-            
+
             if dry_run:
                 console.print(f"[{total_count}] {' '.join(cmd)}")
             else:
                 console.print(f"[{total_count}] Deleting key: {key_name} ... ", end="")
-                
-                result = subprocess.run(cmd, capture_output=True, text=True)
+
+                # For 'os' keyring backend, provide password via stdin
+                if keyring_name == "os":
+                    delete_stdin = f"{pwd}\n"
+                else:
+                    delete_stdin = None
+
+                result = subprocess.run(cmd, capture_output=True, text=True, input=delete_stdin)
                 
                 if result.returncode == 0:
                     success_count += 1
@@ -1640,7 +1660,10 @@ def export_keys(
 
             if show_result.returncode != 0:
                 console.print(f"[red]✗ Failed to get address for key {key_name}[/red]")
-                console.print(f"[red]  Error: {show_result.stderr.strip()}[/red]")
+                if "incorrect passphrase" in show_result.stderr:
+                    console.print(f"[red]  Error: Incorrect password[/red]")
+                else:
+                    console.print(f"[red]  Error: {show_result.stderr.strip()}[/red]")
                 failed_count += 1
                 console.print()
                 continue
